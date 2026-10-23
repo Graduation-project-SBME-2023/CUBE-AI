@@ -1,1 +1,1 @@
-"""Bookkeeping pack: the scratchpad, agent outputs, task context and workspace browsing."""
+"""Bookkeeping pack: the scratchpad, the agent output and workspace browsing."""

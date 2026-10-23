@@ -88,34 +88,14 @@ SUCCESS: dict[str, Case] = {
         [(PUT, f"/runs/{RUN}/output", {"run_id": RUN, "node_id": "n1"}),
          (GET, f"/runs/session/{SESSION}", [])],
     ),
-    "read_agent_output": Case(
-        {"params": {"agent_id": "segmentation_agent"}},
-        [(GET, f"/runs/session/{SESSION}/by-target/segmentation_agent", {"run": RUN_ROW})],
-    ),
-    "read_all_agent_outputs": Case({}, [(GET, f"/runs/session/{SESSION}", [RUN_ROW])]),
     "browse_workspace": Case({"params": {}}),
-    "read_agent_task_context": Case(
-        {}, [(GET, f"/sessions/{SESSION}", {"prompt": "p"}), (GET, f"/runs/{RUN}", RUN_ROW)]
-    ),
-    "scratchpad_register_agent": Case(
-        {"role": "r"}, [(POST, f"/runs/{RUN}/scratchpad/register", {"scratchpad_notes": {}})]
-    ),
     "scratchpad_write_note": Case({"content": "c"}, [(POST, f"/runs/{RUN}/scratchpad/notes", {})]),
     "scratchpad_raise_flag": Case(
         {"level": "info", "message": "m"}, [(POST, f"/runs/{RUN}/scratchpad/flags", {})]
     ),
-    "scratchpad_set_status": Case(
-        {"status": "done"},
-        [(GET, f"/runs/{RUN}", RUN_ROW), (POST, f"/runs/{RUN}/scratchpad/status", {})],
-    ),
     "scratchpad_write_summary": Case(
         {"summary": "s"}, [(POST, f"/runs/{RUN}/scratchpad/summary", {})]
     ),
-    "scratchpad_read_agent": Case(
-        {"target_agent_id": "segmentation_agent"},
-        [(GET, f"/runs/session/{SESSION}/by-target/segmentation_agent", {"run": RUN_ROW})],
-    ),
-    "scratchpad_read_report": Case({}, [(GET, f"/runs/session/{SESSION}/scratchpad", {})]),
     # db_reads
     "get_all_patients_info": Case({}, [(GET, "/patients/", [])]),
     "get_all_studies_info": Case({}, [(GET, "/studies/", [])]),
@@ -246,7 +226,7 @@ def identity_reads(monkeypatch):
 def light_tools():
     catalog = catalog_module.build()
     catalog.validate()
-    return {s.name: s for s in catalog.tools if s.pack != "delegation" and s.name not in HEAVY}
+    return {s.name: s for s in catalog.tools if s.name not in HEAVY}
 
 
 def _context(tmp_path: Path):
@@ -279,7 +259,7 @@ def _run(case: Case, spec, fake_domain_api, monkeypatch, tmp_path) -> Any:
 
 
 def test_every_light_tool_has_a_success_and_an_error_case(light_tools):
-    assert len(light_tools) == 53
+    assert len(light_tools) == 46  # 53 before Phase 0.2 removed 7 bookkeeping tools
     missing_success = set(light_tools) - set(SUCCESS) - set(COVERED_ELSEWHERE)
     missing_error = set(light_tools) - set(ERROR) - set(COVERED_ELSEWHERE)
     assert not missing_success and not missing_error, (missing_success, missing_error)

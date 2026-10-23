@@ -1,8 +1,8 @@
 """The catalog: every tool, agent and artifact type, discovered and validated
 (merged plan, Phase 1.3 step 3).
 
-``build()`` imports the pack packages (``toolpacks``, ``agentpacks`` and the
-toolkit's own ``delegation``) and every module under them, plus any module
+``build()`` imports the pack packages (``toolpacks`` and ``agentpacks``) and
+every module under them, plus any module
 published under the ``cubeai.toolpacks`` / ``cubeai.agentpacks`` entry-point
 groups, and collects what those modules define at top level: ``@tool``
 functions, ``AgentSpec`` and ``ArtifactType`` objects. ``agent.md`` files under
@@ -11,7 +11,7 @@ import list: a new pack is found by being there.
 
 ``validate()`` runs every cross-spec rule at start-up and raises once with all
 the problems. ``resolve()``, ``index()`` and ``describe()`` are what the
-harness, the Main Agent and the Composer read.
+harness, the Main Agent and its subagents read.
 """
 
 from __future__ import annotations
@@ -27,8 +27,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from .agents.loader import AgentFileError, load_agent_file as _load_agent_file
 from .agents.registry import AgentRegistry
-from .agents.spec import AgentKind, AgentSpec
+from .agents.spec import MAIN_AGENT, AgentKind, AgentSpec
 from .artifacts.base import ArtifactType, ArtifactTypeRegistry
 from .artifacts.builtin import builtin_registry
 from .manifest import Visibility
@@ -46,17 +47,15 @@ logger = logging.getLogger(__name__)
 _ROOT = __package__.rpartition(".")[0]
 PACK_PACKAGES: tuple[str, ...] = tuple(
     f"{_ROOT}.{name}" if _ROOT else name
-    for name in ("toolkit.delegation", "toolpacks", "agentpacks")
+    for name in ("toolpacks", "agentpacks")
 )
 ENTRY_POINT_GROUPS: tuple[str, ...] = ("cubeai.toolpacks", "cubeai.agentpacks")
 AGENT_FILE = "agent.md"
 
-MAIN_AGENT = "main_agent"
-CONTROL_FORBIDDEN_TOOLS = frozenset({"run_agent", "plan", "recover"})
-MAIN_AGENT_EXCEPTIONS = frozenset({"plan", "recover"})
 
 type Spec = ToolSpec | AgentSpec
-type AgentFileLoader = Callable[[Path], AgentSpec]
+# (agent.md path, dotted name of its directory as a package) -> spec; see agents/loader.py.
+type AgentFileLoader = Callable[[Path, str], AgentSpec]
 # Plan 4's sandbox policy: returns what is wrong with a tool, empty when nothing is.
 type PolicyHook = Callable[[ToolSpec], Iterable[str]]
 
@@ -76,8 +75,9 @@ class UnknownRefError(UnknownNameError):
 
 
 class IndexAudience(StrEnum):
-    MAIN = "main"  # what Main may call directly or submit as a node
-    COMPOSER = "composer"  # what the Composer may put in a graph
+    # What Main may call directly or submit as a node. Its subagents (the
+    # Composer, the Recovery Agent) read the same index.
+    MAIN = "main"
 
 
 @dataclass(frozen=True)
@@ -130,12 +130,12 @@ class Catalog:
             audience = self.tools.audience_of(agent)
             yield from (f"allowlist names unknown tool {name!r}" for name in unknown)
             yield from (f"may not use {name!r}: not visible to {audience}" for name in hidden)
-            if agent.kind is AgentKind.CONTROL:
-                allowed = MAIN_AGENT_EXCEPTIONS if agent.name == MAIN_AGENT else frozenset()
-                for name in sorted(set(agent.allowed_tools) & (CONTROL_FORBIDDEN_TOOLS - allowed)):
-                    yield f"a control agent may not use {name!r}"
 
-        if not agent.is_graph_node and (agent.inputs or agent.outputs):
+        if agent.is_graph_node:
+            for port_name, port in agent.outputs.items():
+                if port.extract is None:  # the Node Runner could not record the artifact
+                    yield f"output port {port_name!r} needs an extract function"
+        elif agent.inputs or agent.outputs:
             yield f"only execution agents have ports, not {agent.kind} agents"
 
         internal = agent.kind is AgentKind.INTERNAL
@@ -146,15 +146,22 @@ class Catalog:
         if agent.parent is not None:
             if agent.parent not in self.agents:
                 yield f"unknown parent {agent.parent!r}"
-            elif internal and self.agents.get(agent.parent).kind is AgentKind.CONTROL:
-                yield (
-                    f"parent {agent.parent!r} is a control agent; "
-                    "only execution and internal agents start internal agents"
-                )
+            elif internal:
+                owner = self.agents.get(agent.parent)
+                if owner.kind is AgentKind.CONTROL and owner.name != MAIN_AGENT:
+                    yield (
+                        f"parent {agent.parent!r} is a control agent; among control "
+                        f"agents only {MAIN_AGENT!r} has subagents"
+                    )
+                elif agent.name not in owner.delegates:
+                    # Nothing could ever start it: a forgotten entry, not a spare agent.
+                    yield f"parent {agent.parent!r} does not list it in its delegates"
 
-        # Control agents never get run_agent, so their delegates could never run.
-        if agent.kind is AgentKind.CONTROL and agent.delegates:
-            yield f"a control agent has no delegates, not {list(agent.delegates)}"
+        if agent.kind is AgentKind.CONTROL and agent.name != MAIN_AGENT and agent.delegates:
+            yield (
+                f"among control agents only {MAIN_AGENT!r} has delegates, "
+                f"not {list(agent.delegates)}"
+            )
         for name in agent.delegates:
             if name not in self.agents:
                 yield f"unknown delegate {name!r}"
@@ -235,8 +242,9 @@ TOOL_MANIFEST = (
     "priority", "max_attempts", "read_only", "destructive", "idempotent", "critical",
 )  # fmt: skip
 AGENT_MANIFEST = (
-    "model_profile", "delegates", "max_tool_iterations", "timeout_s",
-    "resources", "max_completion_retries", "human_in_the_loop", "resumable", "parent",
+    "model_profile", "delegates", "max_tool_iterations", "timeout_s", "max_budget_usd",
+    "resources", "max_completion_retries", "resumable", "parent", "gate_timeout_s",
+    "effort", "skills",
 )  # fmt: skip
 
 
@@ -294,13 +302,14 @@ def build(
     *,
     packages: Iterable[str] = PACK_PACKAGES,
     entry_point_groups: Iterable[str] = ENTRY_POINT_GROUPS,
-    load_agent_file: AgentFileLoader | None = None,
+    load_agent_file: AgentFileLoader | None = _load_agent_file,
     policy_hooks: Iterable[PolicyHook] = (),
 ) -> Catalog:
     """Discover every pack and return the catalog. Call ``validate()`` next.
 
-    Raises ``CatalogError`` when two different specs claim one name, or when
-    ``agent.md`` files exist but no loader was given.
+    Raises ``CatalogError`` when two different specs claim one name, when an
+    ``agent.md`` file cannot be loaded (every such file is listed), or when
+    ``agent.md`` files exist and ``load_agent_file=None``.
     """
     roots = _pack_roots(packages, entry_point_groups)
     tools: list[ToolSpec] = []
@@ -316,12 +325,15 @@ def build(
                 artifact_types.append(value)
 
     problems: list[str] = []
-    agent_files = sorted({path for root in roots for path in _agent_files(root)})
+    agent_files = dict(sorted(item for root in roots for item in _agent_files(root)))
     if agent_files:
         if load_agent_file is None:
             problems.append(f"found {len(agent_files)} {AGENT_FILE} file(s) but no agent loader")
-        else:
-            agents.extend(load_agent_file(path) for path in agent_files)
+        for path, package in agent_files.items() if load_agent_file else ():
+            try:
+                agents.append(load_agent_file(path, package))
+            except AgentFileError as exc:  # report every broken file, not only the first
+                problems.append(str(exc))
 
     catalog = Catalog(policy_hooks=tuple(policy_hooks))
     for registry, items in (
@@ -366,9 +378,13 @@ def _reraise(_name: str) -> None:
     raise  # pkgutil calls this while handling the ImportError; surface it
 
 
-def _agent_files(root: ModuleType) -> Iterator[Path]:
+def _agent_files(root: ModuleType) -> Iterator[tuple[Path, str]]:
+    """Each ``agent.md`` below ``root``, with its directory's dotted package
+    name under the root's own import name (so hooks load under that root)."""
     for directory in getattr(root, "__path__", ()):
-        yield from Path(directory).rglob(AGENT_FILE)
+        for path in Path(directory).rglob(AGENT_FILE):
+            parts = path.parent.relative_to(directory).parts
+            yield path, ".".join((root.__name__, *parts))
 
 
 def _register_all(registry: Registry[Any], items: Iterable[Any]) -> list[str]:

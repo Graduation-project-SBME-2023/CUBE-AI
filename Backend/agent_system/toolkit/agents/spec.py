@@ -2,9 +2,15 @@
 
 An agent is a definition, never a tool: ``AgentSpec`` is a separate class and
 does not inherit from ``ToolSpec``. Agents are reached as graph nodes
-(``execution``), as the control loop (``control``), or through ``run_agent``
-from their parent (``internal``). Specs are normally built from an ``agent.md``
+(``execution``), as the control loop (``control``), or as an SDK subagent of
+their parent (``internal``). Specs are normally built from an ``agent.md``
 file by the loader (Plan 3); nothing here reads files.
+
+The engine (Plan 9) maps the fields onto the Claude Agent SDK:
+``max_tool_iterations`` is ``max_turns``, ``max_budget_usd`` is the run's
+``max_budget_usd``, ``effort`` is the session's (or the subagent's) effort,
+``skills`` are the ``cubeai`` plugin's skills the session may load, and
+``delegates`` are its subagents.
 
 Like ``ToolSpec``, this module only checks each field on its own. The rules
 that need other specs (unknown or non-internal delegates, delegation cycles,
@@ -32,14 +38,37 @@ if TYPE_CHECKING:
 
 
 class AgentKind(StrEnum):
-    CONTROL = "control"  # main_agent, composer, recovery_agent
+    CONTROL = "control"  # main_agent
     EXECUTION = "execution"  # can be a graph node
-    INTERNAL = "internal"  # reached only through run_agent, from its parent
+    INTERNAL = "internal"  # an SDK subagent of its parent, never started alone
+
+
+class Effort(StrEnum):
+    """The SDK's reasoning effort levels (``EffortLevel``)."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"  # falls back to "high" on models that do not support it
+    MAX = "max"
 
 
 # Agent ids are snake_case (study_population_planner_agent, pico_analyst, ...).
 # They share one namespace with tool names, so they also satisfy TOOL_NAME_PATTERN.
 AGENT_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+# Skill names are the directory names of the cubeai plugin's skills (Phase 3.5).
+SKILL_NAME_PATTERN = AGENT_TYPE_PATTERN
+
+# Tools every execution agent gets without listing them: the SDK's
+# AskUserQuestion (free questions) and TaskCreate / TaskUpdate (progress
+# steps), and ask_user (the domain forms) for the agents that own a form
+# (Phase 9.3). Listing one in allowed_tools is a mistake, so it is refused.
+IMPLICIT_TOOLS: frozenset[str] = frozenset(
+    {"ask_user", "AskUserQuestion", "TaskCreate", "TaskUpdate"}
+)
+
+# The one control agent; its subagents are the Composer and the Recovery Agent.
+MAIN_AGENT = "main_agent"
 
 DEFAULT_MODEL_PROFILE = "agent_default"
 DEFAULT_MAX_TOOL_ITERATIONS = 10
@@ -52,15 +81,37 @@ type SystemPromptFn = Callable[[ToolContext], str]
 type AllowedToolsFn = Callable[[ToolContext, Sequence[ToolSpec]], Iterable[str]]
 # Returns what is still missing before the agent may finish; empty = complete.
 # The engine feeds the issues back and retries up to max_completion_retries times.
-type CompletionCheck = Callable[[ToolContext], Awaitable[Sequence[str]]]
+# The second argument is the agent's final output, already parsed against its
+# output_contract (None when it has none), so the check can hold the ids the
+# model reports against the recorded rows instead of trusting them.
+type CompletionCheck = Callable[[ToolContext, Any], Awaitable[Sequence[str]]]
 # Builds the agent's first message from its task and its node inputs, keyed by port.
 type ContextBuilder = Callable[[str, Mapping[str, Any], ToolContext], str]
+# Runs once after the completion check passes and before the output ports are
+# extracted (the Node Runner, Phase 10.1): records what the agent's output
+# names and returns the run's output. A retry may run it again, so it must be
+# idempotent.
+type OnComplete = Callable[[ToolContext, Any], Awaitable[Any]]
 
 
 def _check_agent_name(value: Any, what: str) -> str:
     if not isinstance(value, str) or not AGENT_TYPE_PATTERN.match(value):
         raise ValueError(f"{what} {value!r} must match {AGENT_TYPE_PATTERN.pattern}")
     return value
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _check_not_implicit(names: Iterable[Any], agent: str) -> None:
+    if not isinstance(names, (str, bytes)) and (
+        implicit := sorted({n for n in names if isinstance(n, str)} & IMPLICIT_TOOLS)
+    ):
+        raise ValueError(
+            f"agent {agent!r}: {implicit} are given to every execution agent "
+            "implicitly; do not list them in allowed_tools"
+        )
 
 
 def _names(values: Any, what: str, pattern: re.Pattern[str]) -> tuple[str, ...]:
@@ -98,7 +149,7 @@ class AgentSpec:
     # --- behaviour
     system_prompt: str | SystemPromptFn
     allowed_tools: tuple[str, ...] | AllowedToolsFn = ()
-    delegates: tuple[str, ...] = ()  # internal agents it may start with run_agent
+    delegates: tuple[str, ...] = ()  # its SDK subagents (internal agents)
     model_profile: str = DEFAULT_MODEL_PROFILE
 
     # --- ports (execution agents only; see toolkit/ports.py)
@@ -106,8 +157,9 @@ class AgentSpec:
     outputs: Mapping[str, PortSpec] = field(default_factory=dict)
 
     # --- budgets
-    max_tool_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS
-    timeout_s: float = DEFAULT_TIMEOUT_S
+    max_tool_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS  # the SDK's max_turns
+    timeout_s: float = DEFAULT_TIMEOUT_S  # running time only; a suspension does not count
+    max_budget_usd: float | None = None  # the SDK's max_budget_usd for one run
     resources: frozenset[Resource] = frozenset({Resource.LLM})
 
     # --- completion rules
@@ -115,17 +167,27 @@ class AgentSpec:
     max_completion_retries: int = 0
     output_contract: type[BaseModel] | None = None
 
-    # --- first message (Plan 12)
+    # --- first message (Plan 12) and the step after the last one
     context_builder: ContextBuilder | None = None
+    on_complete: OnComplete | None = None
 
     # --- UI and ownership
     ui: str | None = None  # view type for the node, e.g. "segmentation_view"
-    human_in_the_loop: bool = False  # user gates inside the node (cohort approval, review)
     parent: str | None = None  # the owner of an internal agent
 
-    # --- checkpoints (D27): a resumable node's retry continues the run's thread.
-    # None takes the kind's default: true for execution agents, false otherwise.
+    # --- saved SDK session (D27): a resumable node keeps one per run
+    # (session_id = run_id), and a retry attempt resumes it. None takes the
+    # kind's default: true for execution agents, false otherwise.
     resumable: bool | None = None
+
+    # --- how long a suspended attempt (a question, a form or a tool
+    # approval) may wait before the Watchdog cancels it; None = no limit.
+    gate_timeout_s: float | None = None
+
+    # --- the SDK session's reasoning effort and skills (None / none: the
+    # model profile's default effort, no skills)
+    effort: Effort | None = None
+    skills: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # Frozen dataclass: normalised values go through object.__setattr__.
@@ -147,6 +209,7 @@ class AgentSpec:
             raise TypeError(f"agent {name!r}: system_prompt must be text or a function")
 
         if not callable(self.allowed_tools):
+            _check_not_implicit(self.allowed_tools, name)
             _set(
                 "allowed_tools",
                 _names(self.allowed_tools, f"agent {name!r}: allowed_tools", TOOL_NAME_PATTERN),
@@ -155,6 +218,9 @@ class AgentSpec:
             "delegates",
             _names(self.delegates, f"agent {name!r}: delegates", AGENT_TYPE_PATTERN),
         )
+        if self.kind is AgentKind.INTERNAL and self.delegates:
+            # The SDK runs subagents one level deep: a subagent has no subagents.
+            raise ValueError(f"agent {name!r}: an internal agent has no delegates")
         if not isinstance(self.model_profile, str) or not self.model_profile.strip():
             raise ValueError(f"agent {name!r}: model_profile must not be empty")
 
@@ -167,6 +233,10 @@ class AgentSpec:
             raise ValueError(f"agent {name!r}: max_tool_iterations must be >= 1")
         if not self.timeout_s > 0:
             raise ValueError(f"agent {name!r}: timeout_s must be > 0")
+        if self.max_budget_usd is not None and (
+            not _is_number(self.max_budget_usd) or not self.max_budget_usd > 0
+        ):
+            raise ValueError(f"agent {name!r}: max_budget_usd must be > 0 or None")
         _set("resources", coerce_enum_set(Resource, self.resources, "resources"))
 
         if self.completion_check is not None and not callable(self.completion_check):
@@ -177,19 +247,26 @@ class AgentSpec:
             isinstance(self.output_contract, type) and issubclass(self.output_contract, BaseModel)
         ):
             raise TypeError(f"agent {name!r}: output_contract must be a pydantic model class")
-        if self.context_builder is not None and not callable(self.context_builder):
-            raise TypeError(f"agent {name!r}: context_builder must be callable")
+        for hook in ("context_builder", "on_complete"):
+            if getattr(self, hook) is not None and not callable(getattr(self, hook)):
+                raise TypeError(f"agent {name!r}: {hook} must be callable")
 
         if self.ui is not None and (not isinstance(self.ui, str) or not self.ui.strip()):
             raise ValueError(f"agent {name!r}: ui must be a non-empty string or None")
-        if not isinstance(self.human_in_the_loop, bool):
-            raise TypeError(f"agent {name!r}: human_in_the_loop must be a bool")
         if self.resumable is None:
             _set("resumable", self.kind is AgentKind.EXECUTION)
         elif not isinstance(self.resumable, bool):
             raise TypeError(f"agent {name!r}: resumable must be a bool or None")
         if self.parent is not None:
             _check_agent_name(self.parent, f"agent {name!r}: parent")
+
+        if self.gate_timeout_s is not None and (
+            not _is_number(self.gate_timeout_s) or not self.gate_timeout_s > 0
+        ):
+            raise ValueError(f"agent {name!r}: gate_timeout_s must be > 0 or None")
+        if self.effort is not None:
+            _set("effort", coerce_enum(Effort, self.effort, "effort"))
+        _set("skills", _names(self.skills, f"agent {name!r}: skills", SKILL_NAME_PATTERN))
 
     # --- derived fields
 
@@ -222,10 +299,10 @@ class AgentSpec:
         function-valued allowlist chooses from; a fixed list ignores them."""
         if not callable(self.allowed_tools):
             return self.allowed_tools
+        names = tuple(self.allowed_tools(ctx, tools))
+        _check_not_implicit(names, self.agent_type)
         return _names(
-            self.allowed_tools(ctx, tools),
-            f"agent {self.agent_type!r}: allowed_tools function result",
-            TOOL_NAME_PATTERN,
+            names, f"agent {self.agent_type!r}: allowed_tools function result", TOOL_NAME_PATTERN
         )
 
     def __repr__(self) -> str:

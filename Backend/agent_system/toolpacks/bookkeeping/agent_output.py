@@ -1,10 +1,11 @@
-"""The agent output tools: an agent's structured output, stored on its run.
+"""The agent output tool: an agent's structured output, stored on its run.
 
-``write_agent_output`` records this run's output (``PUT /runs/{run}/output``);
-the read tools present a run's stored output in the shape the retired
-``outputs/agents/*_output.json`` file had. The only files this module touches
-are the run's disposable scratch directories under ``temp/``, removed once
-the output is recorded.
+``write_agent_output`` records this run's output (``PUT /runs/{run}/output``).
+An agent reads the upstream results from its Node inputs, so there is no read
+tool (Phase 0.2). The only files this module touches are the run's disposable
+scratch directories under ``temp/``, removed once the output is recorded.
+``write_agent_output`` itself goes in Phase 10.1, when the Node Runner records
+the SDK's structured output.
 """
 
 import asyncio
@@ -17,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .._toolkit import error_result, tool
 from ..common import domain_api, views
-from ..common.manifests import READ_ONLY, WRITES
+from ..common.manifests import WRITES
 from storage_paths import TEMP_DIR
 
 logger = logging.getLogger(__name__)
@@ -98,52 +99,6 @@ class WriteAgentOutputInput(BaseModel):
     )
 
 
-class ReadAgentOutputInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    agent_id: str = Field(
-        ...,
-        description="ID of the agent whose output to read.",
-        min_length=1, max_length=64,
-    )
-
-
-# -- Helpers -------------------------------------------------------------------
-
-def _document(run: Dict[str, Any]) -> Dict[str, Any]:
-    """Present a run's stored output in the shape the file had."""
-    node = run.get("node") or {}
-    agent_output = (run.get("scratchpad_summary") or {}).get("agent_output") or {}
-    warnings = [
-        item.get("message")
-        for item in (run.get("scratchpad_warnings") or {}).get("items", [])
-        if item.get("message")
-    ]
-    return {
-        "agent_id": node.get("target_name"),
-        "agent_run_id": run.get("run_id"),  # tool result key, kept (plan.md: no success result shape changes)
-        "step_id": run.get("node_id"),  # tool result key, kept (plan.md: no success result shape changes)
-        "step_order": node.get("position"),  # tool result key, kept (plan.md: no success result shape changes)
-        "agent_role": agent_output.get("agent_role", ""),
-        "status": agent_output.get("status", run.get("status")),
-        "timestamp": agent_output.get("recorded_at"),
-        "inputs": agent_output.get("inputs") or {},
-        "outputs": agent_output.get("outputs") or {},
-        "errors": agent_output.get("errors") or [],
-        "warnings": warnings,
-    }
-
-
-def _pipeline_status(statuses: set[str], has_outputs: bool) -> str:
-    if not has_outputs:
-        return "no_outputs"
-    if "failed" in statuses:
-        return "has_failures"
-    if "partial" in statuses:
-        return "has_partial"
-    return "all_completed"
-
-
 # -- Tools ---------------------------------------------------------------------
 
 @tool(
@@ -188,70 +143,6 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str | dict[str, A
             "message": f"Output saved for agent '{params.agent_id}'.",
             "agent_run_id": run.get("run_id"),  # tool result key, kept (plan.md: no success result shape changes)
             "step_id": run.get("node_id"),  # tool result key, kept (plan.md: no success result shape changes)
-        },
-        indent=2,
-    )
-
-
-@tool(
-    name="read_agent_output",
-    visibility={"agent"},
-    idempotent=True,
-    timeout_s=45,
-    **READ_ONLY,
-)
-async def read_agent_output(params: ReadAgentOutputInput) -> str | dict[str, Any]:
-    """Read the structured output of an agent in this session. When several
-    plan steps name one agent, this resolves the FIRST in plan order and says
-    how many matched."""
-    if not domain_api.session_id():
-        return error_result("no_session", "This call belongs to no session.")
-    try:
-        resolved = await domain_api.run_by_target(params.agent_id)
-    except domain_api.DomainApiError as exc:
-        return domain_api.error_result_from(exc, "Failed to read output")
-    if resolved is None:
-        return error_result("not_found", f"No output found for agent '{params.agent_id}'.")
-
-    document = _document(resolved.get("run") or {})
-    document["steps_sharing_this_agent_type"] = resolved.get("nodes_sharing_this_target")
-    return json.dumps(document, indent=2)
-
-
-@tool(
-    name="read_all_agent_outputs",
-    visibility={"agent"},
-    idempotent=True,
-    timeout_s=45,
-    **READ_ONLY,
-)
-async def read_all_agent_outputs() -> str | dict[str, Any]:
-    """Read every agent's structured output for this session, in plan order."""
-    if not domain_api.session_id():
-        return error_result("no_session", "This call belongs to no session.")
-    try:
-        runs = await domain_api.session_runs()
-    except domain_api.DomainApiError as exc:
-        return domain_api.error_result_from(exc, "Failed to read outputs")
-
-    agents: Dict[str, Any] = {}
-    statuses: set[str] = set()
-    for run in runs:
-        document = _document(run)
-        if not document.get("timestamp"):
-            continue  # this step has not written an output yet
-        key = document["agent_id"] or str(document["step_id"])  # tool result key, kept (plan.md: no success result shape changes)
-        if key in agents:
-            # Two steps share this agent type — keep both, keyed by step.
-            key = f"{key}#{document['step_order']}"  # tool result key, kept (plan.md: no success result shape changes)
-        agents[key] = document
-        statuses.add(document.get("status", "unknown"))
-
-    return json.dumps(
-        {
-            "agent_count": len(agents),
-            "agents": agents,
-            "pipeline_status": _pipeline_status(statuses, bool(agents)),
         },
         indent=2,
     )

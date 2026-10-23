@@ -68,10 +68,8 @@ def _tool(name: str, visibility: set[str], **overrides: Any) -> ToolSpec:
 
 GET_PATIENT = _tool("get_patient", {"main", "agent"})
 LIST_MODELS = _tool("list_models", {"agent"})
-SET_STATUS = _tool("scratchpad_set_status", {"harness"}, side_effects="writes", read_only=False)
-RUN_AGENT = _tool("run_agent", {"agent"}, pack="delegation")
-PLAN = _tool("plan", {"main"}, cost="medium")
-RECOVER = _tool("recover", {"main"}, cost="medium")
+BOOKKEEPING = _tool("record_status", {"harness"}, side_effects="writes", read_only=False)
+GRAPH_PROPOSE = _tool("graph_propose", {"main"})
 SEGMENT = _tool(
     "segment",
     {"graph", "agent"},
@@ -80,7 +78,7 @@ SEGMENT = _tool(
     inputs={"cohort": PortSpec("Cohort", param="cohort_id")},
     outputs={"masks": PortSpec("MaskSet", many=True, extract=_masks)},
 )
-TOOLS = [GET_PATIENT, LIST_MODELS, SET_STATUS, RUN_AGENT, PLAN, RECOVER, SEGMENT]
+TOOLS = [GET_PATIENT, LIST_MODELS, BOOKKEEPING, GRAPH_PROPOSE, SEGMENT]
 
 
 def _agent(agent_type: str, kind: str, **overrides: Any) -> AgentSpec:
@@ -94,12 +92,17 @@ def _agent(agent_type: str, kind: str, **overrides: Any) -> AgentSpec:
     return AgentSpec(**fields)
 
 
-MAIN = _agent("main_agent", "control", allowed_tools=["get_patient", "plan", "recover"])
-COMPOSER = _agent("composer", "control", allowed_tools=lambda ctx, tools: ["get_patient"])
+MAIN = _agent(
+    "main_agent", "control", allowed_tools=["get_patient", "graph_propose"], delegates=["composer"]
+)
+# The Main's SDK subagent: an internal agent that chooses among the main tools.
+COMPOSER = _agent(
+    "composer", "internal", parent="main_agent", allowed_tools=lambda ctx, tools: ["get_patient"]
+)
 SEGMENTATION = _agent(
     "segmentation_agent",
     "execution",
-    allowed_tools=["run_agent", "list_models", "segment"],
+    allowed_tools=["list_models", "segment"],
     delegates=["mask_resolution_agent"],
     inputs={"cohort": PortSpec("Cohort")},
     outputs={
@@ -177,7 +180,7 @@ def test_policy_hooks_report_per_tool():
         return ["harness tools are under review"] if spec.visible_to("harness") else []
 
     assert _catalog(policy_hooks=(no_harness_tools,)).problems() == [
-        "tool 'scratchpad_set_status': harness tools are under review"
+        "tool 'record_status': harness tools are under review"
     ]
 
 
@@ -199,16 +202,17 @@ def test_artifact_type_problems_are_included():
         ("segmentation_agent", {"allowed_tools": ["segmnt"]}, "allowlist names unknown tool 'segmnt'"),
         (
             "segmentation_agent",
-            {"allowed_tools": ["scratchpad_set_status"]},
-            "may not use 'scratchpad_set_status': not visible to agent",
+            {"allowed_tools": ["record_status"]},
+            "may not use 'record_status': not visible to agent",
         ),
         ("main_agent", {"allowed_tools": ["list_models"]}, "may not use 'list_models': not visible to main"),
-        ("composer", {"allowed_tools": ["get_patient", "plan"]}, "a control agent may not use 'plan'"),
+        # The Main's subagents choose among the Main's tools, not the agent tools.
+        ("composer", {"allowed_tools": ["list_models"]}, "may not use 'list_models': not visible to main"),
         ("main_agent", {"inputs": {"cohort": PortSpec("Cohort")}}, "only execution agents have ports, not control agents"),
         ("mask_resolution_agent", {"outputs": {"m": PortSpec("MaskSet")}}, "only execution agents have ports, not internal agents"),
-        ("composer", {"parent": "main_agent"}, "only internal agents have a parent, not control agents"),
-        ("segmentation_agent", {"delegates": ["mask_agent"]}, "unknown delegate 'mask_agent'"),
-        ("segmentation_agent", {"delegates": ["composer"]}, "delegate 'composer' is not an internal agent"),
+        ("main_agent", {"parent": "segmentation_agent"}, "only internal agents have a parent, not control agents"),
+        ("segmentation_agent", {"delegates": ["mask_resolution_agent", "mask_agent"]}, "unknown delegate 'mask_agent'"),
+        ("segmentation_agent", {"delegates": ["mask_resolution_agent", "composer"]}, "delegate 'composer' has parent 'main_agent', not 'segmentation_agent'"),
     ],
 )  # fmt: skip
 def test_agent_rules(agent, changes, problem):
@@ -217,13 +221,10 @@ def test_agent_rules(agent, changes, problem):
     ]
 
 
-def test_main_may_use_plan_and_recover_but_not_run_agent():
-    agents = _replace(AGENTS, "main_agent", allowed_tools=["plan", "recover", "run_agent"])
+def test_the_mains_subagents_may_use_the_main_tools():
+    agents = _replace(AGENTS, "composer", allowed_tools=["get_patient", "graph_propose"])
 
-    assert _catalog(agents=agents).problems() == [
-        "agent 'main_agent': may not use 'run_agent': not visible to main",
-        "agent 'main_agent': a control agent may not use 'run_agent'",
-    ]
+    assert _catalog(agents=agents).problems() == []
 
 
 def test_an_unknown_parent():
@@ -236,39 +237,71 @@ def test_an_unknown_parent():
     ]
 
 
-def test_a_control_agent_cannot_own_internal_agents():
-    critic = _agent("graph_critic", "internal", parent="composer")
-    agents = [*_replace(AGENTS, "composer", delegates=["graph_critic"]), critic]
+def test_only_the_main_has_subagents_among_control_agents():
+    session = _agent("session_agent", "control", delegates=["graph_critic"])
+    critic = _agent("graph_critic", "internal", parent="session_agent")
+    agents = [*AGENTS, session, critic]
 
     assert _catalog(agents=agents).problems() == [
-        "agent 'composer': a control agent has no delegates, not ['graph_critic']",
-        "agent 'graph_critic': parent 'composer' is a control agent; "
-        "only execution and internal agents start internal agents",
+        "agent 'session_agent': among control agents only 'main_agent' has delegates, "
+        "not ['graph_critic']",
+        "agent 'graph_critic': parent 'session_agent' is a control agent; among control "
+        "agents only 'main_agent' has subagents",
     ]
 
 
-def test_an_internal_agent_can_own_internal_agents():
-    checker = _agent("label_checker_agent", "internal", parent="mask_resolution_agent")
-    agents = [
-        *_replace(AGENTS, "mask_resolution_agent", delegates=["label_checker_agent"]),
-        checker,
-    ]
-
-    assert _catalog(agents=agents).problems() == []
+def test_an_internal_agent_has_no_subagents():
+    """The SDK runs subagents one level deep, so an internal agent never delegates."""
+    with pytest.raises(ValueError, match="an internal agent has no delegates"):
+        copy.replace(MASK_RESOLUTION, delegates=["label_checker_agent"])
 
 
 def test_delegation_cycles():
-    agents = _replace(AGENTS, "mask_resolution_agent", delegates=["segmentation_agent"])
+    agents = _replace(
+        AGENTS, "segmentation_agent", delegates=["mask_resolution_agent", "segmentation_agent"]
+    )
 
     assert _catalog(agents=agents).problems() == [
+        "agent 'segmentation_agent': delegate 'segmentation_agent' is not an internal agent",
         "agent 'segmentation_agent': is in a delegation cycle",
-        "agent 'mask_resolution_agent': delegate 'segmentation_agent' is not an internal agent",
-        "agent 'mask_resolution_agent': is in a delegation cycle",
     ]
 
 
+def test_an_internal_agent_nobody_lists_is_refused():
+    agents = _replace(AGENTS, "segmentation_agent", delegates=[])
+
+    assert _catalog(agents=agents).problems() == [
+        "agent 'mask_resolution_agent': parent 'segmentation_agent' does not list it in its "
+        "delegates"
+    ]
+
+
+def test_an_execution_agent_output_needs_an_extract():
+    agents = _replace(AGENTS, "segmentation_agent", outputs={"masks": PortSpec("MaskSet")})
+
+    assert _catalog(agents=agents).problems() == [
+        "agent 'segmentation_agent': output port 'masks' needs an extract function"
+    ]
+
+
+def test_describe_shows_the_sdk_fields():
+    agents = _replace(
+        AGENTS, "segmentation_agent", effort="high", skills=["segmentation_choices"], max_budget_usd=3
+    )
+    catalog = _catalog(agents=agents)
+
+    assert catalog.problems() == []
+    described = catalog.describe("segmentation_agent")
+    assert (described["effort"], described["skills"], described["max_budget_usd"]) == (
+        "high",
+        ["segmentation_choices"],
+        3,
+    )
+    json.dumps(described)
+
+
 def test_dynamic_allowlists_are_checked_at_run_time_not_here():
-    agents = _replace(AGENTS, "composer", allowed_tools=lambda ctx, tools: ["plan"])
+    agents = _replace(AGENTS, "composer", allowed_tools=lambda ctx, tools: ["graph_apply"])
 
     assert _catalog(agents=agents).problems() == []
 
@@ -307,8 +340,7 @@ def test_resolve():
 def test_main_index():
     assert _catalog().index("main") == [
         {"name": "get_patient", "kind": "tool", "description": "Get patient.", "cost": "light", "use": ["call"]},
-        {"name": "plan", "kind": "tool", "description": "Plan.", "cost": "medium", "use": ["call"]},
-        {"name": "recover", "kind": "tool", "description": "Recover.", "cost": "medium", "use": ["call"]},
+        {"name": "graph_propose", "kind": "tool", "description": "Graph propose.", "cost": "light", "use": ["call"]},
         {
             "name": "segment",
             "kind": "tool",
@@ -329,11 +361,10 @@ def test_main_index():
     ]  # fmt: skip
 
 
-def test_composer_index_lists_only_graph_nodes():
-    assert [entry["name"] for entry in _catalog().index("composer")] == [
-        "segment",
-        "segmentation_agent",
-    ]
+def test_the_mains_subagents_read_the_mains_index():
+    """There is no Composer audience: the Composer is the Main's subagent."""
+    with pytest.raises(ValueError):
+        _catalog().index("composer")
 
 
 def test_a_tool_can_be_called_and_submitted():
@@ -380,10 +411,14 @@ def test_describe_an_agent():
 
     assert segmentation["kind"] == "agent"
     assert segmentation["agent_kind"] == "execution"
-    assert segmentation["tools"] == ["run_agent", "list_models", "segment"]
+    assert segmentation["tools"] == ["list_models", "segment"]
     assert segmentation["delegates"] == ["mask_resolution_agent"]
     assert segmentation["resources"] == ["llm"]
     assert segmentation["output_schema"] is None
+    assert (segmentation["effort"], segmentation["skills"]) == (None, [])
+    assert segmentation["gate_timeout_s"] is None
+    assert not {"gates", "human_in_the_loop", "workflow", "max_context_tokens"} & segmentation.keys()
+    assert composer["parent"] == "main_agent"
     assert composer["tools"] == "dynamic"
     assert composer["output_schema"]["title"] == "_Proposal"
     json.dumps(segmentation)
@@ -394,11 +429,7 @@ def test_describe_an_agent():
 
 
 def test_default_pack_packages_follow_the_toolkit_import_root():
-    assert PACK_PACKAGES == (
-        "agent_system.toolkit.delegation",
-        "agent_system.toolpacks",
-        "agent_system.agentpacks",
-    )
+    assert PACK_PACKAGES == ("agent_system.toolpacks", "agent_system.agentpacks")
 
 
 def test_missing_pack_packages_are_skipped():
@@ -500,16 +531,33 @@ def test_agent_files_go_through_the_loader(pack_root):
     name, write = pack_root
     first = write("agentpacks/research/seg_agent/agent.md", "---\nagent_type: seg_agent\n---\n")
     second = write("agentpacks/core/main_agent/agent.md", "---\nagent_type: main_agent\n---\n")
-    loaded: list[Path] = []
+    loaded: dict[Path, str] = {}
 
-    def load(path: Path) -> AgentSpec:
-        loaded.append(path)
+    def load(path: Path, package: str) -> AgentSpec:
+        loaded[path] = package
         return _agent(path.parent.name, "execution")
 
     catalog = build(packages=[f"{name}.agentpacks"], entry_point_groups=(), load_agent_file=load)
 
-    assert sorted(loaded) == sorted([first, second])
+    # Each file comes with its directory's package name, under the pack's own root.
+    assert loaded == {
+        first: f"{name}.agentpacks.research.seg_agent",
+        second: f"{name}.agentpacks.core.main_agent",
+    }
     assert catalog.agents.names() == {"seg_agent", "main_agent"}
+
+
+def test_every_broken_agent_file_is_reported_at_once(pack_root):
+    name, write = pack_root
+    write("agentpacks/research/seg_agent/agent.md", "no front matter\n")
+    write("agentpacks/research/feature_agent/agent.md", "---\nagent_type: other\n---\n")
+
+    with pytest.raises(CatalogError) as caught:
+        build(packages=[f"{name}.agentpacks"], entry_point_groups=())
+
+    problems = caught.value.problems
+    assert len(problems) == 2
+    assert "feature_agent" in problems[0] and "seg_agent" in problems[1]
 
 
 def test_agent_files_without_a_loader_are_an_error(pack_root):
@@ -517,7 +565,7 @@ def test_agent_files_without_a_loader_are_an_error(pack_root):
     write("agentpacks/research/seg_agent/agent.md", "---\n---\n")
 
     with pytest.raises(CatalogError, match=r"found 1 agent\.md file\(s\) but no agent loader"):
-        build(packages=[f"{name}.agentpacks"], entry_point_groups=())
+        build(packages=[f"{name}.agentpacks"], entry_point_groups=(), load_agent_file=None)
 
 
 def test_entry_point_packs(pack_root, monkeypatch):

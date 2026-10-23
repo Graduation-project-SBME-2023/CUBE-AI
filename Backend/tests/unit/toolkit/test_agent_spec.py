@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from agent_system.toolkit.agents.spec import AgentKind, AgentSpec
+from agent_system.toolkit.agents.spec import IMPLICIT_TOOLS, AgentKind, AgentSpec, Effort
 from agent_system.toolkit.ports import ExtractedArtifact, PortSpec
 from agent_system.toolkit.manifest import Resource
 from agent_system.toolkit.tools.spec import ToolSpec
@@ -32,7 +32,7 @@ def _masks(result: Any) -> ExtractedArtifact:
     return ExtractedArtifact(ref={"segmentation_batch_id": result["run"]})
 
 
-async def _handoff_issues(ctx: Any) -> list[str]:
+async def _handoff_issues(ctx: Any, output: Any) -> list[str]:
     return []
 
 
@@ -87,8 +87,12 @@ def test_defaults_and_normalisation():
     assert spec.resources == frozenset({Resource.LLM})
     assert spec.completion_check is None
     assert spec.max_completion_retries == 0
-    assert spec.human_in_the_loop is False
     assert spec.parent is None
+    assert spec.gate_timeout_s is None
+    assert spec.effort is None
+    assert spec.skills == ()
+    assert spec.max_budget_usd is None
+    assert spec.on_complete is None
 
 
 @pytest.mark.parametrize(
@@ -115,8 +119,8 @@ def test_spec_is_immutable_and_copy_replace_revalidates():
     with pytest.raises(TypeError):
         spec.inputs["masks"] = PortSpec("MaskSet")  # type: ignore[index]
 
-    changed = copy.replace(spec, timeout_s=10800, human_in_the_loop=True)
-    assert (changed.timeout_s, changed.human_in_the_loop) == (10800, True)
+    changed = copy.replace(spec, timeout_s=10800, effort="high")
+    assert (changed.timeout_s, changed.effort) == (10800, Effort.HIGH)
     with pytest.raises(ValueError, match="kind="):
         copy.replace(spec, kind="planner")
 
@@ -136,12 +140,13 @@ def test_a_population_style_agent():
         delegates=[],
         completion_check=_handoff_issues,
         max_completion_retries=2,
-        human_in_the_loop=True,
         ui="population_view",
+        skills=["cohort_building"],
     )
 
     assert spec.completion_check is _handoff_issues
     assert spec.max_completion_retries == 2
+    assert spec.skills == ("cohort_building",)
 
 
 def test_an_internal_agent():
@@ -165,7 +170,7 @@ def test_an_internal_agent():
     [("execution", True), ("control", False), ("internal", False)],
 )
 def test_only_execution_agents_are_graph_nodes(kind, graph_node):
-    spec = _agent(kind=kind, inputs={}, outputs={})
+    spec = _agent(kind=kind, delegates=[], inputs={}, outputs={})
 
     assert spec.is_graph_node is graph_node
 
@@ -212,7 +217,7 @@ def test_allowlist_by_visibility():
     )
     tools = [
         _tool("get_patient", {"main", "agent"}),
-        _tool("scratchpad_set_status", {"harness"}),
+        _tool("write_note", {"harness"}),
         _tool("get_volume", {"main"}),
     ]
 
@@ -263,15 +268,67 @@ def test_allowlist_function_result_is_checked():
         ({"output_contract": dict}, TypeError, "output_contract"),
         ({"output_contract": _Proposal(summary="x")}, TypeError, "output_contract"),
         ({"context_builder": "build"}, TypeError, "context_builder"),
+        ({"on_complete": "record"}, TypeError, "on_complete"),
         ({"ui": ""}, ValueError, "ui"),
-        ({"human_in_the_loop": "yes"}, TypeError, "human_in_the_loop"),
         ({"resumable": "yes"}, TypeError, "resumable"),
         ({"parent": "Segmentation"}, ValueError, "parent"),
+        ({"gate_timeout_s": 0}, ValueError, "gate_timeout_s"),
+        ({"gate_timeout_s": True}, ValueError, "gate_timeout_s"),
+        ({"effort": "extreme"}, ValueError, "effort='extreme'"),
+        ({"skills": "modeling"}, TypeError, "not a string"),
+        ({"skills": ["Modeling"]}, ValueError, "skills entry"),
+        ({"skills": ["modeling", "modeling"]}, ValueError, "more than once"),
+        ({"max_budget_usd": 0}, ValueError, "max_budget_usd"),
+        ({"max_budget_usd": True}, ValueError, "max_budget_usd"),
     ],
 )
 def test_malformed_fields_are_refused(overrides, error, match):
     with pytest.raises(error, match=match):
         _agent(**overrides)
+
+
+# --- the Claude Agent SDK fields (Phase 3.1)
+
+
+def test_sdk_fields():
+    spec = _agent(
+        effort="xhigh", skills=["segmentation_choices"], max_budget_usd=2.5, gate_timeout_s=86400
+    )
+
+    assert spec.effort is Effort.XHIGH
+    assert spec.skills == ("segmentation_choices",)
+    assert spec.max_budget_usd == 2.5
+    assert spec.gate_timeout_s == 86400  # no gate needed: any suspension counts
+
+
+@pytest.mark.parametrize("field", ["human_in_the_loop", "gates", "workflow", "build_graph"])
+def test_the_pre_sdk_fields_are_gone(field):
+    with pytest.raises(TypeError):
+        _agent(**{field: None})
+    assert not hasattr(_agent(), field)
+
+
+@pytest.mark.parametrize("name", sorted(IMPLICIT_TOOLS))
+def test_implicit_tools_are_never_listed(name):
+    with pytest.raises(ValueError, match="implicitly"):
+        _agent(allowed_tools=["list_models", name])
+    spec = _agent(allowed_tools=lambda ctx, tools: [name])
+    with pytest.raises(ValueError, match="implicitly"):
+        spec.tools_for(CTX, [])
+
+
+def test_an_internal_agent_has_no_delegates():
+    """The SDK runs subagents one level deep."""
+    with pytest.raises(ValueError, match="an internal agent has no delegates"):
+        _agent(kind="internal", parent="segmentation_agent", inputs={}, outputs={})
+
+
+async def _record(ctx: Any, output: Any) -> Any:
+    return output
+
+
+def test_on_complete_is_a_hook():
+    assert _agent(on_complete=_record).on_complete is _record
 
 
 def test_required_fields():
@@ -285,7 +342,13 @@ def test_required_fields():
 
 def test_output_contract_accepts_a_model_class():
     spec = _agent(
-        agent_type="composer", kind="control", output_contract=_Proposal, inputs={}, outputs={}
+        agent_type="composer",
+        kind="internal",
+        parent="main_agent",
+        delegates=[],
+        output_contract=_Proposal,
+        inputs={},
+        outputs={},
     )
 
     assert spec.output_contract is _Proposal

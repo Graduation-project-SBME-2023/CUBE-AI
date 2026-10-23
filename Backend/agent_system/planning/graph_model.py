@@ -279,14 +279,6 @@ class GraphProposal(_Model):
     errors: list[ValidationError] = Field(default_factory=list)
 
 
-class RecoveryProposal(_Model):
-    """The Recovery Agent's answer (Plan 13)."""
-
-    diagnosis: str
-    diff: Optional[GraphDiff] = None
-    user_message: str
-
-
 # ----------------------------------------------------------------------
 # apply_ops
 # ----------------------------------------------------------------------

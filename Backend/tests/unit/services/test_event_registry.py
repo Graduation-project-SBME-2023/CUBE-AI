@@ -97,15 +97,17 @@ def test_every_literal_event_type_emitted_is_registered(path: Path, pattern: str
 
 
 def test_scratchpad_updates_own_payload_subtype_is_not_mistaken_for_its_msg_type():
-    """agent_status/agent_summary are values of a "type" key *inside*
+    """agent_note/agent_summary are values of a "type" key *inside*
     scratchpad_update's payload, not the event_type passed to
     emit_view. If this ever changes, the scoped regex above would
-    start silently under-scanning; this pins the current shape."""
+    start silently under-scanning; this pins the current shape.
+    (agent_status went with scratchpad_set_status in Phase 0.2.)"""
     source = _source(TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py")
     assert re.search(r'emit_view\(\s*"scratchpad_update"', source)
     # The payload's nested "type" is _show()'s first argument.
     assert '"type": event' in source
-    assert re.search(r'_show\(\s*"agent_status"', source)
+    assert re.search(r'_show\(\s*"agent_note"', source)
     assert re.search(r'_show\(\s*"agent_summary"', source)
+    assert not re.search(r'_show\(\s*"agent_status"', source)
     assert "agent_status" not in DURABLE_EVENT_TYPES | EPHEMERAL_EVENT_TYPES
     assert "agent_summary" not in DURABLE_EVENT_TYPES | EPHEMERAL_EVENT_TYPES

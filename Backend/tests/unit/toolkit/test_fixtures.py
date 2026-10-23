@@ -18,9 +18,7 @@ from agent_system.toolkit.tools.registry import spec_of, tool
 from tests.support.toolkit_fixtures import (
     DOMAIN_API_URL,
     TEST_SESSION_ID,
-    FakeAgentRuntime,
     call_tool,
-    fake_runtime,
     make_context,
 )
 
@@ -75,14 +73,6 @@ def test_fake_context_fields_can_be_overridden(fake_context, fake_event_sink):
 def test_call_tool_needs_a_tool():
     with pytest.raises(TypeError, match="not a tool"):
         call_tool(print, {}, make_context())
-
-
-def test_fake_runtime_runs_the_scripted_agents():
-    runtime = fake_runtime([SEGMENTATION])
-
-    assert isinstance(runtime, FakeAgentRuntime)
-    assert runtime.agents.names() == {"segmentation_agent"}
-    assert runtime.engine.calls == []
 
 
 # --- catalogs

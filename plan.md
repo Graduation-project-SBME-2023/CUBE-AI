@@ -167,10 +167,10 @@ deploy/
 
 | # | Plan | Milestone | Depends on | Status |
 |---|---|---|---|---|
-| 0 | Runtime and cleanup: Python 3.13, PyCaret removed, dead code removed | M0 Runtime | – | 🟡 0.1 implemented, CI not green yet; 0.2 (remove what the SDK replaces) not started |
+| 0 | Runtime and cleanup: Python 3.13, PyCaret removed, dead code removed | M0 Runtime | – | 🟡 0.1 implemented, CI not green yet; 0.2 done 2026-10-23 (branch `track/p2-agents`) |
 | 1 | Toolkit Core | M1 Toolkit | – | ✅ Done (1.1–1.5) |
 | 2 | Tool Packs | M1 | 1 | ✅ Done (2.1–2.5) |
-| 3 | Agent Definitions and Skills | M1 | 1, 2 | 🟡 Built on the pre-SDK design, not merged; Phase 3.0 reworks it for the SDK |
+| 3 | Agent Definitions and Skills | M1 | 1, 2 | 🟡 Phase 3.0 done 2026-10-23 (branch `track/p2-agents`): 16 agents, `validate()` passes; merges with Phase 0.2 |
 | 4 | _(removed: no sandbox)_ | – | – | – |
 | 5 | Job Platform (PostgreSQL + Procrastinate) | M2 Compute | 1, 6 | 🟡 5.1 started: the contract types (`contract.py`, `JobStatus`) done 2026-10-22; decisions of 2026-10-22 (SSE wait, MONAI owns the GPU, one submit) written in |
 | 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | ✅ Done (6.1–6.6; 6.6 migration "t" on 2026-10-22) |
@@ -250,6 +250,8 @@ Code built in Plans 1, 2 and 8 that the Claude Agent SDK (or the Node Runner and
 | `apply(…, turn_id, call_id)` in the Diff Engine | Plan 8 follow-up | `apply(…, session_id, tool_use_id)` |
 
 **Done when:** the deterministic gate passes, the catalog loads with the tools above gone, and no source file names a removed symbol.
+
+**Status (2026-10-23): done** on `track/p2-agents`, in the same branch as Phase 3.0 (both edit `AgentSpec` and `catalog.py`). Items 1–4 are removed with their tests; `FakeAgentRuntime` / `fake_runtime` (the fake `session_handle` delegation read) went too. The catalog has 55 tools (62 − 7) and no `delegation` pack, and `IndexAudience` has only `MAIN`. The internal agents of `main_agent` choose among the `main` tools (`ToolRegistry.audience_of`). The frozen AutoGen files still name the removed tools; they go in Plan 17.
 
 ---
 
@@ -341,6 +343,17 @@ Do this on the built branch, before it merges. It is the same kind of change as 
 - The prompts copied from `system_prompts/system_messages.py`, the ports, `completion_check`, `context_builder`, `allowed_tools_fn` and the output-port `extract` hooks stay as built.
 
 **Done when:** no file under `agentpacks/`, `skills/`, `toolkit/agents/` or `tests/unit/agentpacks/` names a removed field, tool or LangGraph symbol; the catalog has the agent counts of Phase 3.5's *Done when* (1 control, 6 execution, 9 internal); `validate()` passes; and the Plan 3 tests pass. Then Plan 3 merges.
+
+**Status (2026-10-23): done** on `track/p2-agents`. The built Plan 3 was the uncommitted `plan-3-agents-skills` work of the OHIF-Standalone checkout; it is imported as built (first commit), then reworked. The only names of the old fields left are the loader's refusal messages and the tests that check them. As built:
+
+- **A new hook, `on_complete`** (`async (ctx, output) -> output`): it runs once after the completion check passes, before the output ports are extracted, and must be idempotent. It is the literature review's "output hook": it takes the files (`release`), records the review (`review_key = run_id`) and its papers, sends `lit_review_output`, and returns the record the `literature` port reads. The Node Runner calls it (Phase 10.1).
+- **`max_context_tokens` is removed**, not kept: the Phase 9.0 spike has not found a per-session setting. Add it back if it does.
+- **`scratchpad_write_summary` and `scratchpad_raise_flag` stay** (the decision of Phase 3.2): they are not part of any `output_contract`, so the canvas keeps reading them. Revisit with the structured output of Phase 10.1.
+- **The reporters' upstream data:** with the read tools gone, `result_reporter_agent` gets optional `cohort` and `masks` inputs, and `latex_reporter_agent` optional `cohort`, `masks`, `features` and `modeling` inputs. The earlier steps' *flags* no longer reach them (only the result reporter's limitations do); Phase 10.1 decides whether Node inputs carry each upstream run's warnings.
+- **`composer` and `recovery_agent`** choose their tools at run time from `SUBAGENT_TOOLS` (`agentpacks/core/_subagent_tools.py`: the 4 read-only `main` tools and `graph_propose`), so `validate()` passes before the control tools of Phase 12.2 exist; `main_agent` takes every `main` tool.
+- **`literature_review_agent` lists its 5 delegates now**, with a prompt that does every part itself and says it *may* hand parts to them, so it runs the same before and after Phase 9.6.
+- **The population and segmentation prompts** describe the Phase 9.7 behaviour (`ask_user` only when the node instructions ask for it; otherwise `generate_targets` freezes the cohort automatically and the batch is `auto_accepted`). Until 9.7, `generate_targets` and the segmentation tool still wait for the UI.
+- **Skills:** the plugin is `skills/cubeai/` (`.claude-plugin/plugin.json` and `skills/<name>/SKILL.md`, front matter `name` and `description` only). The SDK namespaces plugin skills as `cubeai:<name>`, so the engine (Phase 9.4) maps an `agent.md`'s bare names. `toolkit/skills.py` (the old loader and index) is removed.
 
 ## Phase 3.1 — The `agent.md` format and loader
 

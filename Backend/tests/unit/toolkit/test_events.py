@@ -43,7 +43,7 @@ def _ctx(**overrides: Any) -> ToolContext:
         ({"agent_type": "segmentation_agent", "tool_name": "list_models"}, "segmentation_agent"),
         # an internal agent: still the node's agent
         (
-            {"agent_type": "segmentation_agent", "subagent": "mask_resolution_agent", "depth": 1},
+            {"agent_type": "segmentation_agent", "subagent": "mask_resolution_agent"},
             "segmentation_agent",
         ),
         # a Tool Node: the tool

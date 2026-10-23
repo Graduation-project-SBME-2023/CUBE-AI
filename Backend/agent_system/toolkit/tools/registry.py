@@ -20,7 +20,7 @@ from typing import Any
 
 from pydantic import BaseModel, create_model
 
-from ..agents.spec import AgentKind, AgentSpec
+from ..agents.spec import MAIN_AGENT, AgentKind, AgentSpec
 from ..context import ToolContext
 from ..manifest import Visibility
 from ..registry import Registry, UnknownNameError
@@ -74,8 +74,8 @@ def tool[F: ToolHandler](
 
 
 def spec_of(obj: object) -> ToolSpec | None:
-    """``obj`` itself when it is a ``ToolSpec`` (built by a factory such as
-    ``make_agent_tool``), or the spec ``@tool`` recorded on it, if any."""
+    """``obj`` itself when it is a ``ToolSpec`` (built by a factory rather
+    than ``@tool``), or the spec ``@tool`` recorded on it, if any."""
     if isinstance(obj, ToolSpec):
         return obj
     spec = getattr(obj, TOOL_SPEC_ATTR, None)
@@ -148,9 +148,10 @@ class ToolRegistry(Registry[ToolSpec]):
 
     @staticmethod
     def audience_of(agent: AgentSpec) -> Visibility:
-        """Control agents choose among the ``main`` tools, every other agent
-        among the ``agent`` tools."""
-        return Visibility.MAIN if agent.kind is AgentKind.CONTROL else Visibility.AGENT
+        """The Main and its subagents (the Composer, the Recovery Agent) choose
+        among the ``main`` tools, every other agent among the ``agent`` tools."""
+        main = agent.kind is AgentKind.CONTROL or agent.parent == MAIN_AGENT
+        return Visibility.MAIN if main else Visibility.AGENT
 
     def screen(self, agent: AgentSpec, names: Iterable[str]) -> tuple[list[str], list[str]]:
         """Split an allowlist's problems into (unknown names, names ``agent`` may not use)."""
@@ -165,8 +166,7 @@ class ToolRegistry(Registry[ToolSpec]):
         """The tools ``agent`` gets for this run, in its allowlist's order.
 
         A function-valued allowlist only ever sees the tools of the agent's
-        audience; a fixed one naming anything else is refused. A tool with a
-        ``for_caller`` binding is returned specialized for ``agent``.
+        audience; a fixed one naming anything else is refused.
         """
         candidates = self.visible_to(self.audience_of(agent))
         names = agent.tools_for(ctx, candidates)
@@ -178,8 +178,4 @@ class ToolRegistry(Registry[ToolSpec]):
                 f"agent {agent.agent_type!r} may not use {hidden}: "
                 f"not visible to {self.audience_of(agent).value!r}"
             )
-        return tuple(_bound(self.get(name), agent) for name in names)
-
-
-def _bound(spec: ToolSpec, agent: AgentSpec) -> ToolSpec:
-    return spec.for_caller(spec, agent) if spec.for_caller is not None else spec
+        return tuple(self.get(name) for name in names)
