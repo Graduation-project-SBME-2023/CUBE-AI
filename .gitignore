@@ -17,6 +17,9 @@ __pycache__/
 # .env
 # deploy/.env
 
+# The LiteLLM provider credentials (Phase 9.2); copy deploy/litellm.env.example.
+deploy/litellm.env
+
 
 # Backend runtime data lives under one generated-data boundary.
 Backend/storage/*

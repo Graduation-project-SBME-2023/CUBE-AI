@@ -32,10 +32,15 @@ services:
       CONTROL_API_URL: http://application-api:8001
       ORTHANC_URL: http://orthanc:8042
       ORTHANC_WEBHOOK_TOKEN: ${ORTHANC_WEBHOOK_TOKEN:-}
+      # The agent engine reaches every model through LiteLLM (Phase 9.2).
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY:-sk-cubeai-dev}
     env_file:
       - .env
     depends_on:
       application-api:
+        condition: service_healthy
+      litellm:
         condition: service_healthy
     healthcheck:
       test: [ "CMD", "python", "-c", 'import urllib.request; urllib.request.urlopen("http://localhost:8150/client-config", timeout=3)' ]
@@ -48,6 +53,33 @@ services:
       timeout: 4s
       retries: 24
       start_period: 180s
+    restart: unless-stopped
+
+  # The model proxy (Phase 9.2): config only, no database. It is the one service
+  # with provider credentials, read from litellm.env (not .env, which the agents
+  # container also reads). Not published: only the agents container calls it.
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.106.2
+    container_name: litellm
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    volumes:
+      - ${COMPOSE_PROJECT_DIR}/deploy/litellm/config.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-cubeai-dev}
+      OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://host.docker.internal:11434}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-ollama}
+    env_file:
+      - path: litellm.env
+        required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: [ "CMD", "python", "-c", 'import urllib.request; urllib.request.urlopen("http://localhost:4000/health/liveliness", timeout=3)' ]
+      interval: 30s
+      start_interval: 3s
+      timeout: 4s
+      retries: 10
+      start_period: 60s
     restart: unless-stopped
 
   application-api:

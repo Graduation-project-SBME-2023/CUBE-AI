@@ -1,0 +1,36 @@
+# The LiteLLM proxy every model call goes through (merged plan, Phase 9.2).
+#
+# The Claude Agent SDK's CLI talks to it in the Anthropic Messages format
+# (ANTHROPIC_BASE_URL = this service). One model_list entry per alias of
+# Backend/agent_system/config/models.yaml. Only this service holds provider
+# credentials: they come from deploy/litellm.env (see litellm.env.example),
+# never from deploy/.env, which the agents container also reads.
+#
+# Ollama: the alias goes to Ollama's own Anthropic-format endpoint
+# (`anthropic/<model>`, api_base = Ollama), which keeps prompt caching and
+# clean thinking blocks. LiteLLM's `ollama_chat/` provider also calls tools,
+# but drops cache reads and sends thinking blocks without a signature
+# (Phase 9.0 finding 6).
+#
+# Known limits (Phase 9.2 item 7): Anthropic does not support routing Claude
+# Code to non-Claude models through a gateway, so a model's tool use is
+# measured in the agent-regression suite before its alias serves an agent.
+# Sessions that go through a gateway are not eligible for Anthropic's HIPAA
+# configuration (Plan 13).
+model_list:
+  - model_name: cubeai-gpt-oss
+    litellm_params:
+      model: anthropic/gpt-oss:120b-cloud
+      api_base: os.environ/OLLAMA_API_BASE
+      api_key: os.environ/OLLAMA_API_KEY
+
+  # Claude, once ANTHROPIC_API_KEY is set in deploy/litellm.env (and the alias
+  # is uncommented in models.yaml). Run the open Claude checks of Phase 9.0
+  # (cubeai-docs/agent-system/phase-9.0-spike/README.md) before an agent uses it.
+  # - model_name: cubeai-claude
+  #   litellm_params:
+  #     model: anthropic/<claude model id>
+  #     api_key: os.environ/ANTHROPIC_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
