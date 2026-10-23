@@ -197,6 +197,9 @@ PY313_ONLY_TESTS = (
     "tests/contracts/test_graph_change_contract.py",
     # Plan 5: compares jobs_core's copies with the toolkit's rules.
     "tests/unit/jobs/test_contract_matches_toolkit.py",
+    # Plans 3 and 12: the agent packs and the harness load the toolkit catalog.
+    "tests/unit/agentpacks",
+    "tests/unit/harness",
 )
 collect_ignore = list(PY313_ONLY_TESTS) if sys.version_info < (3, 13) else []
 

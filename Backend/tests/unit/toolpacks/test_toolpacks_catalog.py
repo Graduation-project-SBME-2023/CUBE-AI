@@ -63,6 +63,7 @@ MOVED_TOOLS: dict[str, set[str]] = {
 }
 # Tools Plan 2 adds on top of the moved ones (Phase 2.4).
 ADDED_TOOLS: dict[str, set[str]] = {
+    "interaction": {"ask_user"},  # Phase 9.3 item 3
     "segmentation": {"run_segmentation_with_guard"},
     "literature": {
         "search_pubmed", "search_arxiv", "search_semantic_scholar", "search_europe_pmc",
@@ -100,8 +101,9 @@ def pack_tools(catalog):
 def test_the_catalog_finds_every_moved_tool_in_its_pack(catalog, pack_tools):
     assert sum(len(names) for names in MOVED_TOOLS.values()) == 55
     expected = {
-        pack: (names | ADDED_TOOLS.get(pack, set())) - REMOVED_TOOLS.get(pack, set())
-        for pack, names in MOVED_TOOLS.items()
+        pack: (MOVED_TOOLS.get(pack, set()) | ADDED_TOOLS.get(pack, set()))
+        - REMOVED_TOOLS.get(pack, set())
+        for pack in MOVED_TOOLS.keys() | ADDED_TOOLS.keys()
     }
     found = {pack: {spec.name for spec in specs} for pack, specs in catalog.tools.by_pack().items()}
     assert found == expected  # no "delegation" pack: run_agent is gone (Phase 0.2)
@@ -150,7 +152,7 @@ def test_every_light_tool_states_its_budget_and_scopes(pack_tools):
     writes nothing outside the process may leave data_scopes empty, but every
     one states its timeout instead of inheriting the default."""
     light = {n: s for n, s in pack_tools.items() if n not in INTERIM_HEAVY_TOOLS}
-    assert len(light) == 46
+    assert len(light) == 47
     implicit = [
         n for n, s in light.items()
         # getsource() of an @tool function starts at its decorator.
@@ -231,4 +233,4 @@ def test_the_container_root_builds_the_same_catalog(tmp_path):
         capture_output=True, text=True, env=env, timeout=120, check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["55", "False"]  # 55 moved + 7 added - 7 removed
+    assert result.stdout.split() == ["56", "False"]  # 55 moved + 8 added - 7 removed
