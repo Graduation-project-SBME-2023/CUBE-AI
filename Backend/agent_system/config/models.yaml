@@ -1,0 +1,51 @@
+# Model profiles and the LiteLLM aliases they use (merged plan, Phase 9.2).
+#
+# Every model is reached through the LiteLLM service (deploy/litellm/config.yaml):
+# an alias here must be a `model_name` there. The Model Gateway
+# (harness/model_gateway.py) turns a profile into what an SDK session needs.
+# Which models the aliases point at is configuration, not code: change
+# deploy/litellm/config.yaml, not this file, to move an alias to another model.
+#
+# aliases:
+#   locality       local | external. `local` only for a model served on our own
+#                  machines; PHI-Local sessions may use nothing else (Plan 13.3).
+#   claude_native  true for a Claude model. false turns off the CLI's Anthropic-only
+#                  betas and its attribution header.
+#   context_window the model's context in tokens. The CLI does not know non-Claude
+#                  models and assumes 200,000, so set it for them: the session is
+#                  compacted before the window fills (Phase 9.0 finding 5). Values
+#                  under 100,000 are not applied by the CLI.
+#
+# profiles: alias (required), fallback_alias (same locality), effort
+#   (low | medium | high | xhigh | max). The user can pick another alias per profile in
+#   the model settings (/client-config); the profile's alias is the default.
+#
+# Data only: this directory has no __init__.py.
+v: 1
+aliases:
+  # gpt-oss:120b-cloud runs on Ollama's cloud, so it is external, not local.
+  cubeai-gpt-oss:
+    locality: external
+    claude_native: false
+    context_window: 131072
+  # Uncomment with the matching entry in deploy/litellm/config.yaml once an
+  # Anthropic key is configured (only the LiteLLM service holds it).
+  # cubeai-claude:
+  #   locality: external
+  #   claude_native: true
+  # A model served by a local Ollama, for PHI-Local sessions (Plan 13.3).
+  # local_default:
+  #   locality: local
+  #   claude_native: false
+  #   context_window: 131072
+profiles:
+  main:
+    alias: cubeai-gpt-oss
+  composer:
+    alias: cubeai-gpt-oss
+  recovery:
+    alias: cubeai-gpt-oss
+  agent_default:
+    alias: cubeai-gpt-oss
+  extraction:
+    alias: cubeai-gpt-oss
