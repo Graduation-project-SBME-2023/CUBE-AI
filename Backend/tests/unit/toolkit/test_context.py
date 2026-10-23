@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from agent_system.toolkit.agents.engine import EngineHooks
 from agent_system.toolkit.context import (
     Caller,
     ExecutionMode,
@@ -122,12 +123,13 @@ def test_payload_is_json_and_leaves_out_live_objects():
         job_id="job-1",
         event_sink=_Sink(),
         session_handle=object(),
+        engine_hooks=EngineHooks(),
     )
 
     payload = ctx.to_payload()
 
     assert json.loads(json.dumps(payload)) == payload
-    assert not {"event_sink", "session_handle", "cancel"} & payload.keys()
+    assert not {"event_sink", "session_handle", "engine_hooks", "cancel"} & payload.keys()
     assert payload["caller"] == "node"
     assert payload["execution_mode"] == "plan"
     assert payload["privacy_mode"] == "phi_local"
@@ -142,7 +144,16 @@ def test_payload_round_trip_attaches_this_sides_live_objects():
 
     assert rebuilt == ctx  # live objects do not take part in equality
     assert rebuilt.event_sink is sink
-    assert rebuilt.session_handle is None
+    assert rebuilt.session_handle is rebuilt.engine_hooks is None
+
+
+def test_the_engine_hooks_are_live_and_carried_to_tool_calls():
+    hooks = EngineHooks()
+    ctx = _ctx(engine_hooks=hooks)
+
+    assert ctx.for_tool("list_models").engine_hooks is hooks
+    assert ToolContext.from_payload(ctx.to_payload(), engine_hooks=hooks).engine_hooks is hooks
+    assert ctx == _ctx()  # not part of equality
 
 
 def test_from_payload_refuses_unknown_fields():

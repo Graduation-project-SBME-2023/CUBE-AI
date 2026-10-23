@@ -10,7 +10,7 @@ context.
 A job (Plan 5) runs in another process: the context crosses over as
 ``to_payload()`` and is rebuilt with ``from_payload()``. The payload is JSON
 and leaves out the live objects (``event_sink``, ``session_handle``,
-``cancel``); the worker attaches its own.
+``engine_hooks``, ``cancel``); the worker attaches its own.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from .manifest import coerce_enum
 
 if TYPE_CHECKING:
+    from .agents.engine import EngineHooks
     from .events import EventSink
     from .runtime.cancel import CancelToken
 
@@ -51,7 +52,9 @@ class PrivacyMode(StrEnum):
 
 
 # The live objects; they never enter the payload.
-LIVE_FIELDS: frozenset[str] = frozenset({"event_sink", "session_handle", "cancel"})
+LIVE_FIELDS: frozenset[str] = frozenset(
+    {"event_sink", "session_handle", "engine_hooks", "cancel"}
+)
 
 
 class NoToolContextError(RuntimeError):
@@ -79,6 +82,8 @@ class ToolContext:
     # --- live objects: excluded from the payload, equality and repr
     event_sink: EventSink | None = field(default=None, compare=False, repr=False)
     session_handle: Any = field(default=None, compare=False, repr=False)
+    # The session's pause flag and the node's mailbox, read by the engine (Phase 9.3).
+    engine_hooks: EngineHooks | None = field(default=None, compare=False, repr=False)
     # The call's cancel token, set by dispatch: long work can check it or pass it down.
     cancel: CancelToken | None = field(default=None, compare=False, repr=False)
 
@@ -128,6 +133,7 @@ class ToolContext:
         *,
         event_sink: EventSink | None = None,
         session_handle: Any = None,
+        engine_hooks: EngineHooks | None = None,
         cancel: CancelToken | None = None,
     ) -> ToolContext:
         """Rebuild a context from ``to_payload()``, attaching this side's live objects."""
@@ -139,6 +145,7 @@ class ToolContext:
             **payload,
             event_sink=event_sink,
             session_handle=session_handle,
+            engine_hooks=engine_hooks,
             cancel=cancel,
         )
 

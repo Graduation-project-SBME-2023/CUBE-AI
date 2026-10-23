@@ -21,6 +21,7 @@ ENGINES = "engines"
 FORBIDDEN_ROOTS = frozenset({
     "autogen", "autogen_agentchat", "autogen_core", "autogen_ext",
     "langgraph", "langchain", "langchain_core",
+    "claude_agent_sdk", "anthropic", "litellm",
     "mcp", "fastmcp",
     "fastapi", "starlette", "sqlalchemy",
     # the agent system around the toolkit (bare imports work in the container)
