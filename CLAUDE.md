@@ -357,6 +357,26 @@ exactly one Agent System worker.** Multi-worker needs a shared broker/store firs
 
 ## Conventions
 
+### Comments and docstrings
+
+Comments, docstrings, test docstrings and error messages are written for someone reading the
+file who knows nothing about the roadmap or the team. This applies to every file you write or edit,
+in any language.
+
+- Describe the code: what it does, what it takes and returns, how it behaves in each case, and why
+  when a choice is not obvious. A docstring starts with an imperative line ("Return ...",
+  "Bind ..."), then the details.
+- Never cite the roadmap in code: no "merged plan", "Phase 10.1", "Plan 5", `plan.md`,
+  `team-plan.md`, "simple version" or "not here yet"; no decision, invariant or transaction ids
+  (D24, T4, I12, H13, ...); no team roles (Person 1–5); no components that do not exist yet. Explain
+  the concept instead: "T4 refused" becomes "the store refused the start"; "the D24 fence" becomes
+  "every write carries the attempt id, so the store can refuse writes from a stale attempt".
+- What is missing, planned or blocked goes in `plan.md`, never in the code.
+- Older files still cite phases and decision ids. Rewrite such a comment when you change the code
+  it describes, and never copy that style into new code.
+- Before finishing, search the files you touched for `Phase|Plan \d|plan\.md|team-plan|D\d\d|T\d|I\d\d|Person`
+  and rewrite each hit.
+
 ### Backend
 
 - Strict layering in `application_api/`: `api/routes/*` (thin, `APIRouter(prefix=..., tags=[...])`,

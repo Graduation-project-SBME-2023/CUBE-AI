@@ -195,6 +195,9 @@ PY313_ONLY_TESTS = (
     "tests/unit/execution/test_affected.py",
     "tests/unit/execution/test_diff_engine.py",
     "tests/contracts/test_graph_change_contract.py",
+    # The node runner runs toolkit specs.
+    "tests/unit/execution/test_artifact_refs.py",
+    "tests/unit/execution/test_node_runner.py",
     # Plan 5: compares jobs_core's copies with the toolkit's rules.
     "tests/unit/jobs/test_contract_matches_toolkit.py",
 )
