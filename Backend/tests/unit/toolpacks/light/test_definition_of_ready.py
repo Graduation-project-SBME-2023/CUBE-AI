@@ -64,6 +64,7 @@ RUN_ROW = {"run_id": RUN, "node_id": "n1", "status": "running",
 COHORT = {"cohort_id": "c1", "criteria": {}, "frozen_at": "t",
           "members": [{"volume_series_instance_uid": "v1", "subject_key": "p1",
                        "label": {"has_target_disease": True}}]}
+COHORT_UUID = "44444444-4444-4444-8444-444444444444"
 GET, POST, PUT = "GET", "POST", "PUT"
 
 
@@ -95,6 +96,13 @@ SUCCESS: dict[str, Case] = {
     ),
     "scratchpad_write_summary": Case(
         {"summary": "s"}, [(POST, f"/runs/{RUN}/scratchpad/summary", {})]
+    ),
+    # interaction
+    "ask_user": Case(
+        {"form": "cohort_approval", "payload": {"cohort_id": COHORT_UUID, "summary": "s"}},
+        [(GET, f"/cohorts/session/{SESSION}/population",
+          {"cohort_id": COHORT_UUID, "frozen_at": "t", "frozen_by": "user"}),
+         (GET, f"/cohorts/{COHORT_UUID}/analysis-rows", [])],
     ),
     # db_reads
     "get_all_patients_info": Case({}, [(GET, "/patients/", [])]),
@@ -259,7 +267,7 @@ def _run(case: Case, spec, fake_domain_api, monkeypatch, tmp_path) -> Any:
 
 
 def test_every_light_tool_has_a_success_and_an_error_case(light_tools):
-    assert len(light_tools) == 46  # 53 before Phase 0.2 removed 7 bookkeeping tools
+    assert len(light_tools) == 47  # 53, - 7 bookkeeping tools (Phase 0.2), + ask_user (Phase 9.3)
     missing_success = set(light_tools) - set(SUCCESS) - set(COVERED_ELSEWHERE)
     missing_error = set(light_tools) - set(ERROR) - set(COVERED_ELSEWHERE)
     assert not missing_success and not missing_error, (missing_success, missing_error)
