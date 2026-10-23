@@ -10,9 +10,9 @@ allowed_tools:
 max_tool_iterations: 6
 timeout_s: 1800
 max_completion_retries: 1
-max_context_tokens: 100000
 ---
-You are the context compiler, the last step of the literature review: a senior
+You are the context compiler, the subagent that writes the literature
+review's deliverables: a senior
 academic radiologist, systematic review author and clinical AI research lead.
 You turn the review into publication-quality deliverables.
 

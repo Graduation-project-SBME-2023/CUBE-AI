@@ -74,7 +74,15 @@ INTERIM_HEAVY_TOOLS = {
     "radiomics_extract_features", "radiomics_analyze_importance", "run_segmentation",
     "run_segmentation_with_guard", *MOVED_TOOLS["modeling"],
 }
-HARNESS_TOOLS = {"scratchpad_register_agent", "scratchpad_set_status"}
+# Phase 0.2: what the SDK and the Node Runner replace. A run's lifecycle is the
+# Node Runner's, and an agent reads upstream results from its Node inputs.
+REMOVED_TOOLS: dict[str, set[str]] = {
+    "bookkeeping": {
+        "scratchpad_register_agent", "scratchpad_set_status", "scratchpad_read_agent",
+        "scratchpad_read_report", "read_agent_output", "read_all_agent_outputs",
+        "read_agent_task_context",
+    },
+}
 
 
 @pytest.fixture(scope="module")
@@ -86,16 +94,20 @@ def catalog():
 
 @pytest.fixture(scope="module")
 def pack_tools(catalog):
-    return {spec.name: spec for spec in catalog.tools if spec.pack != "delegation"}
+    return {spec.name: spec for spec in catalog.tools}
 
 
 def test_the_catalog_finds_every_moved_tool_in_its_pack(catalog, pack_tools):
     assert sum(len(names) for names in MOVED_TOOLS.values()) == 55
-    expected = {pack: names | ADDED_TOOLS.get(pack, set()) for pack, names in MOVED_TOOLS.items()}
+    expected = {
+        pack: (names | ADDED_TOOLS.get(pack, set())) - REMOVED_TOOLS.get(pack, set())
+        for pack, names in MOVED_TOOLS.items()
+    }
     found = {pack: {spec.name for spec in specs} for pack, specs in catalog.tools.by_pack().items()}
-    found.pop("delegation")  # run_agent, Plan 1
-    assert found == expected
-    assert len(pack_tools) == 55 + sum(len(names) for names in ADDED_TOOLS.values())
+    assert found == expected  # no "delegation" pack: run_agent is gone (Phase 0.2)
+    added = sum(len(names) for names in ADDED_TOOLS.values())
+    removed = sum(len(names) for names in REMOVED_TOOLS.values())
+    assert len(pack_tools) == 55 + added - removed
 
 
 def test_the_interim_heavy_tools_are_marked_for_plan_7(pack_tools):
@@ -138,7 +150,7 @@ def test_every_light_tool_states_its_budget_and_scopes(pack_tools):
     writes nothing outside the process may leave data_scopes empty, but every
     one states its timeout instead of inheriting the default."""
     light = {n: s for n, s in pack_tools.items() if n not in INTERIM_HEAVY_TOOLS}
-    assert len(light) == 53
+    assert len(light) == 46
     implicit = [
         n for n, s in light.items()
         # getsource() of an @tool function starts at its decorator.
@@ -162,9 +174,11 @@ def test_the_tools_that_touch_patient_data_say_so(pack_tools):
         assert not pack_tools[name].phi, name
 
 
-def test_only_the_run_bookkeeping_is_harness_only(pack_tools):
+def test_no_tool_is_harness_only(pack_tools):
+    """The two harness-only bookkeeping tools went with Phase 0.2: the Node
+    Runner owns a run's lifecycle (T4-T6)."""
     harness = {name for name, spec in pack_tools.items() if spec.visibility == {Visibility.HARNESS}}
-    assert harness == HARNESS_TOOLS
+    assert harness == set()
 
 
 def test_the_main_tools_are_read_only(pack_tools):
@@ -202,7 +216,7 @@ def test_the_container_root_builds_the_same_catalog(tmp_path):
         from toolkit import catalog
         built = catalog.build()
         built.validate()
-        print(len([s for s in built.tools if s.pack != "delegation"]))
+        print(len(built.tools))
         print("agent_system.toolkit" in sys.modules)
         """
     )
@@ -217,4 +231,4 @@ def test_the_container_root_builds_the_same_catalog(tmp_path):
         capture_output=True, text=True, env=env, timeout=120, check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["62", "False"]  # 55 moved + 7 added
+    assert result.stdout.split() == ["55", "False"]  # 55 moved + 7 added - 7 removed

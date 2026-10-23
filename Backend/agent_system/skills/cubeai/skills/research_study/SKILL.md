@@ -1,7 +1,6 @@
 ---
 name: research_study
 description: Turning a research idea into a PICO hypothesis, and the usual shape of a radiomics study graph.
-applies_to: [main, composer]
 ---
 # Designing a radiomics research study
 
@@ -43,8 +42,8 @@ Validator rather than run.
 | Node | Takes | Gives |
 |---|---|---|
 | `literature_review_agent` (optional) | the PICO | `LiteratureContext` |
-| `study_population_planner_agent` | the hypothesis | `Cohort` (approved by the doctor) |
-| `segmentation_agent` | `Cohort` | `MaskSet` (reviewed by the radiologist) |
+| `study_population_planner_agent` | the hypothesis | `Cohort` (frozen) |
+| `segmentation_agent` | `Cohort` | `MaskSet` (reviewed, or accepted automatically) |
 | `feature_extraction_agent` | `Cohort`, `MaskSet` | `FeatureTable[]`, `FeatureImportance` |
 | `run_modeling` | `FeatureTable[]` | `ModelingOutput` |
 | `result_reporter_agent` | `ModelingOutput` | `ResultSummary` |
@@ -58,8 +57,11 @@ Common variations, decided from the study, never from a fixed rule:
 - only modeling and reporting when frozen feature sets already exist;
 - only the reporters when the user wants a report on recorded results.
 
-Two steps wait for a person: the doctor approves the cohort, the radiologist
-reviews the masks. Tell the user when their action is what the study waits for.
+A step waits for a person only when the user asked for it: the doctor
+approves the cohort, the radiologist reviews the masks (say so in that node's
+task), or the user releases a node submitted with `approval: before` or
+`approval: after`. Tell the user when their action is what the study waits
+for.
 
 ## 3. What to put in each node's task
 

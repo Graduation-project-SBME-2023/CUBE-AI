@@ -2,7 +2,7 @@
 
 An ``AgentEngine`` runs one ``AgentSpec`` on one task and returns an
 ``AgentResult``. Nothing outside ``toolkit/engines/`` knows how: the
-LangGraph engine arrives in Plan 9, and ``FakeAgentEngine`` stands in for it
+Claude Agent SDK engine arrives in Plan 9, and ``FakeAgentEngine`` stands in for it
 in tests. Every tool call an engine makes goes through dispatch.
 """
 

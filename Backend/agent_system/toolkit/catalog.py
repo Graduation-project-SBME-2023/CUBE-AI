@@ -1,8 +1,8 @@
 """The catalog: every tool, agent and artifact type, discovered and validated
 (merged plan, Phase 1.3 step 3).
 
-``build()`` imports the pack packages (``toolpacks``, ``agentpacks`` and the
-toolkit's own ``delegation``) and every module under them, plus any module
+``build()`` imports the pack packages (``toolpacks`` and ``agentpacks``) and
+every module under them, plus any module
 published under the ``cubeai.toolpacks`` / ``cubeai.agentpacks`` entry-point
 groups, and collects what those modules define at top level: ``@tool``
 functions, ``AgentSpec`` and ``ArtifactType`` objects. ``agent.md`` files under
@@ -11,7 +11,7 @@ import list: a new pack is found by being there.
 
 ``validate()`` runs every cross-spec rule at start-up and raises once with all
 the problems. ``resolve()``, ``index()`` and ``describe()`` are what the
-harness, the Main Agent and the Composer read.
+harness, the Main Agent and its subagents read.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from typing import Any
 
 from .agents.loader import AgentFileError, load_agent_file as _load_agent_file
 from .agents.registry import AgentRegistry
-from .agents.spec import AgentKind, AgentSpec
+from .agents.spec import MAIN_AGENT, AgentKind, AgentSpec
 from .artifacts.base import ArtifactType, ArtifactTypeRegistry
 from .artifacts.builtin import builtin_registry
 from .manifest import Visibility
@@ -47,15 +47,11 @@ logger = logging.getLogger(__name__)
 _ROOT = __package__.rpartition(".")[0]
 PACK_PACKAGES: tuple[str, ...] = tuple(
     f"{_ROOT}.{name}" if _ROOT else name
-    for name in ("toolkit.delegation", "toolpacks", "agentpacks")
+    for name in ("toolpacks", "agentpacks")
 )
 ENTRY_POINT_GROUPS: tuple[str, ...] = ("cubeai.toolpacks", "cubeai.agentpacks")
 AGENT_FILE = "agent.md"
 
-MAIN_AGENT = "main_agent"
-RUN_AGENT = "run_agent"
-CONTROL_FORBIDDEN_TOOLS = frozenset({RUN_AGENT, "plan", "recover"})
-MAIN_AGENT_EXCEPTIONS = frozenset({"plan", "recover"})
 
 type Spec = ToolSpec | AgentSpec
 # (agent.md path, dotted name of its directory as a package) -> spec; see agents/loader.py.
@@ -79,8 +75,9 @@ class UnknownRefError(UnknownNameError):
 
 
 class IndexAudience(StrEnum):
-    MAIN = "main"  # what Main may call directly or submit as a node
-    COMPOSER = "composer"  # what the Composer may put in a graph
+    # What Main may call directly or submit as a node. Its subagents (the
+    # Composer, the Recovery Agent) read the same index.
+    MAIN = "main"
 
 
 @dataclass(frozen=True)
@@ -133,25 +130,13 @@ class Catalog:
             audience = self.tools.audience_of(agent)
             yield from (f"allowlist names unknown tool {name!r}" for name in unknown)
             yield from (f"may not use {name!r}: not visible to {audience}" for name in hidden)
-            if agent.kind is AgentKind.CONTROL:
-                allowed = MAIN_AGENT_EXCEPTIONS if agent.name == MAIN_AGENT else frozenset()
-                for name in sorted(set(agent.allowed_tools) & (CONTROL_FORBIDDEN_TOOLS - allowed)):
-                    yield f"a control agent may not use {name!r}"
-            if agent.workflow and RUN_AGENT in agent.allowed_tools:
-                yield f"a workflow agent starts its steps itself and may not use {RUN_AGENT!r}"
 
         if agent.is_graph_node:
             for port_name, port in agent.outputs.items():
                 if port.extract is None:  # the Node Runner could not record the artifact
                     yield f"output port {port_name!r} needs an extract function"
-        else:
-            if agent.inputs or agent.outputs:
-                yield f"only execution agents have ports, not {agent.kind} agents"
-            # Only a node can suspend: an attempt is what a gate parks (T10).
-            if agent.gates:
-                yield f"only execution agents have gates, not {agent.kind} agents"
-            if agent.workflow:
-                yield f"only execution agents have a workflow, not {agent.kind} agents"
+        elif agent.inputs or agent.outputs:
+            yield f"only execution agents have ports, not {agent.kind} agents"
 
         internal = agent.kind is AgentKind.INTERNAL
         if internal and agent.parent is None:
@@ -163,31 +148,20 @@ class Catalog:
                 yield f"unknown parent {agent.parent!r}"
             elif internal:
                 owner = self.agents.get(agent.parent)
-                if owner.kind is AgentKind.CONTROL:
+                if owner.kind is AgentKind.CONTROL and owner.name != MAIN_AGENT:
                     yield (
-                        f"parent {agent.parent!r} is a control agent; "
-                        "only execution and internal agents start internal agents"
+                        f"parent {agent.parent!r} is a control agent; among control "
+                        f"agents only {MAIN_AGENT!r} has subagents"
                     )
-                elif agent.name not in (*owner.delegates, *owner.workflow):
+                elif agent.name not in owner.delegates:
                     # Nothing could ever start it: a forgotten entry, not a spare agent.
-                    yield (
-                        f"parent {agent.parent!r} lists it in neither its delegates "
-                        "nor its workflow"
-                    )
+                    yield f"parent {agent.parent!r} does not list it in its delegates"
 
-        for name in agent.workflow:
-            if name not in self.agents:
-                yield f"unknown workflow step {name!r}"
-                continue
-            step = self.agents.get(name)
-            if step.kind is not AgentKind.INTERNAL:
-                yield f"workflow step {name!r} is not an internal agent"
-            elif step.parent != agent.name:
-                yield f"workflow step {name!r} has parent {step.parent!r}, not {agent.name!r}"
-
-        # Control agents never get run_agent, so their delegates could never run.
-        if agent.kind is AgentKind.CONTROL and agent.delegates:
-            yield f"a control agent has no delegates, not {list(agent.delegates)}"
+        if agent.kind is AgentKind.CONTROL and agent.name != MAIN_AGENT and agent.delegates:
+            yield (
+                f"among control agents only {MAIN_AGENT!r} has delegates, "
+                f"not {list(agent.delegates)}"
+            )
         for name in agent.delegates:
             if name not in self.agents:
                 yield f"unknown delegate {name!r}"
@@ -268,9 +242,9 @@ TOOL_MANIFEST = (
     "priority", "max_attempts", "read_only", "destructive", "idempotent", "critical",
 )  # fmt: skip
 AGENT_MANIFEST = (
-    "model_profile", "delegates", "max_tool_iterations", "timeout_s",
-    "resources", "max_completion_retries", "human_in_the_loop", "resumable", "parent",
-    "gates", "gate_timeout_s", "max_context_tokens", "workflow",
+    "model_profile", "delegates", "max_tool_iterations", "timeout_s", "max_budget_usd",
+    "resources", "max_completion_retries", "resumable", "parent", "gate_timeout_s",
+    "effort", "skills",
 )  # fmt: skip
 
 

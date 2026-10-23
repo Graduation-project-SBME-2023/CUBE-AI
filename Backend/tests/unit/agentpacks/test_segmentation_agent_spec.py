@@ -18,7 +18,6 @@ from agent_system.toolkit.agents.engine import AgentResult, AgentStatus
 from agent_system.toolkit.agents.spec import AgentKind
 from agent_system.toolkit.artifacts.builtin import MASK_SET
 from agent_system.toolkit.catalog import build
-from agent_system.toolkit.manifest import Gate
 from tests.support.toolkit_fixtures import make_context
 
 pytestmark = pytest.mark.unit
@@ -58,11 +57,16 @@ def test_the_spec(spec):
     assert spec.max_tool_iterations == 6
 
 
-def test_the_review_is_a_gate_of_the_node(spec):
-    assert spec.gates == frozenset({Gate.SEGMENTATION_REVIEW})
-    assert spec.human_in_the_loop is True
+def test_the_review_happens_only_when_the_user_asked_for_it(spec):
+    """D28: no fixed gate; the agent asks with ask_user when the node
+    instructions say so, and the batch is accepted automatically otherwise."""
+    assert not hasattr(spec, "gates")
+    assert "ask_user" not in spec.allowed_tools  # implicit, never listed
+    assert "`ask_user` with `form`: `segmentation_review`" in spec.system_prompt
+    assert "Otherwise the batch is accepted automatically" in spec.system_prompt
     assert spec.gate_timeout_s is None  # a radiologist's review has no deadline
-    assert spec.resumable is True  # the suspended node resumes from its checkpoint
+    assert spec.resumable is True  # the suspended node resumes its saved session
+    assert spec.skills == ("segmentation_choices",)
 
 
 def test_the_prompt_keeps_the_clinical_decisions_in_the_tool(spec):
@@ -88,9 +92,9 @@ def test_the_internal_agents(name, contract, tools):
     assert agent.allowed_tools == tools
     # The segmentation module's own model, not a copy of it.
     assert agent.output_contract is contract
-    assert agent.resumable is False  # it runs inside its parent's checkpoint
+    assert agent.resumable is False  # its transcript is stored with its parent's
     assert agent.max_completion_retries == 1  # the planner's one retry
-    assert not agent.gates and not agent.inputs and not agent.outputs
+    assert not agent.delegates and not agent.inputs and not agent.outputs
 
 
 def test_the_internal_agents_carry_the_clinical_policy_verbatim():

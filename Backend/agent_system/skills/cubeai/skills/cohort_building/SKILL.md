@@ -1,14 +1,14 @@
 ---
 name: cohort_building
-description: Briefing the population step - criteria, labelling modes, cohort size, and the doctor's approval.
-applies_to: [main, composer]
+description: Building the study cohort - criteria, labelling modes, cohort size, and when the doctor approves it.
 ---
 # Building the study cohort
 
 The population step (`study_population_planner_agent`) turns the hypothesis
 into inclusion and exclusion criteria, finds the matching volumes in the
-archive, labels them, and waits for the doctor to approve the cohort. Its
-output, the approved `Cohort`, is what every later step measures.
+archive, labels them, and freezes the cohort, after the doctor's approval
+when the user asked for one. Its output, the frozen `Cohort`, is what every
+later step measures.
 
 ## What its task should say
 
@@ -27,8 +27,8 @@ output, the approved `Cohort`, is what every later step measures.
 The doctor chooses the mode in the Population view before the step starts:
 
 - **automatic** (the default): an LLM adjudicator reads each patient's
-  clinical report and proposes a label with a confidence; the doctor reviews
-  them at approval.
+  clinical report and proposes a label with a confidence; the doctor can
+  review them when the user asked to approve the cohort.
 - **manual**: the doctor labels every volume; no label is extracted
   automatically.
 
@@ -43,11 +43,16 @@ Either way, only volumes with a label take part in the analysis.
 - Under about 30 labelled volumes, modeling restricts itself to simple
   estimators, and feature extraction should prefer fewer feature classes.
 - When the archive has no matching volume, the step does not invent one: the
-  doctor can select volumes by hand at the approval step. Tell the user.
+  doctor can select volumes by hand when the user asked to approve the
+  cohort. Tell the user.
 
-## The doctor's approval
+## The doctor's approval (only when the user asks for it)
 
-The node waits, holding no resources, until the doctor approves the cohort in
-the Population view. The doctor may add or remove volumes and change labels;
-the approved cohort is the only one later steps use. When a study waits on
-this approval, say so to the user rather than report the step as stuck.
+The doctor approves the cohort only when the user asked for it: the node
+instructions then say so, and the agent asks with the cohort form
+(`ask_user`). The node waits, holding no resources, until the doctor
+approves the cohort in the Population view; the doctor may add or remove
+volumes and change labels. Otherwise the cohort is frozen automatically.
+Either way, the frozen cohort is the only one later steps use. When a study
+waits on this approval, say so to the user rather than report the step as
+stuck.

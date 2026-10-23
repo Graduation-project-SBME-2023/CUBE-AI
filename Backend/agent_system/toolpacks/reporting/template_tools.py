@@ -107,14 +107,14 @@ async def get_latex_template(params: GetTemplateInput) -> str | dict:
 
     Returns the raw LaTeX template with <<PLACEHOLDER>> markers, plus the
     guide section for that template explaining what data to put in each
-    placeholder and which agent outputs to source it from.
+    placeholder and which recorded results to source it from.
 
     Workflow:
     1. Call list_latex_templates to see options and selection criteria
-    2. Call read_all_agent_outputs to assess study results
+    2. Assess the study results from your Node inputs and get_modeling_results
     3. Choose the template based on selection criteria
     4. Call this tool (get_latex_template) with the chosen template_name
-    5. Replace each <<PLACEHOLDER>> with LaTeX content from agent outputs
+    5. Replace each <<PLACEHOLDER>> with LaTeX content from those results
     6. Call latex_to_pdf with the filled template
     """
     template_path = _templates_dir() / f"{params.template_name}.tex"

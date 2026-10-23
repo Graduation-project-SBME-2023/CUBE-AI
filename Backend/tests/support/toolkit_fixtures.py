@@ -8,8 +8,6 @@ conftest also runs in the MONAI image (Python 3.10).
 The plain classes and functions work without pytest fixtures too:
 
 - ``FakeEventSink`` records what dispatch emits;
-- ``FakeAgentRuntime`` is the ``session_handle`` delegation reads
-  (``agents`` + a ``FakeAgentEngine``);
 - ``make_context`` / ``make_catalog`` build a ``ToolContext`` / ``Catalog``
   with test defaults;
 - ``call_tool`` runs one call through dispatch, synchronously.
@@ -18,16 +16,13 @@ The plain classes and functions work without pytest fixtures too:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
 import respx
 
-from agent_system.toolkit.agents.engine import FakeAgentEngine, Script
-from agent_system.toolkit.agents.registry import AgentRegistry
 from agent_system.toolkit.agents.spec import AgentSpec
 from agent_system.toolkit.artifacts.base import ArtifactType
 from agent_system.toolkit.catalog import Catalog
@@ -59,19 +54,6 @@ class FakeEventSink:
     @property
     def types(self) -> list[str]:
         return [event.event_type for event in self.events]
-
-
-@dataclass
-class FakeAgentRuntime:
-    """What delegation finds on ``ToolContext.session_handle`` (``AgentRuntime``)."""
-
-    agents: AgentRegistry
-    engine: FakeAgentEngine = field(default_factory=FakeAgentEngine)
-
-
-def fake_runtime(agents: Iterable[AgentSpec], **scripts: Script) -> FakeAgentRuntime:
-    """A runtime with ``agents``; ``scripts`` maps an agent type to its scripted run."""
-    return FakeAgentRuntime(AgentRegistry(agents), FakeAgentEngine(scripts))
 
 
 def make_context(**fields: Any) -> ToolContext:

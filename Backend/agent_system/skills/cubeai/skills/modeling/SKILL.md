@@ -1,7 +1,6 @@
 ---
 name: modeling
 description: Setting up run_modeling for a radiomics study - target, task, feature sets, folds, estimators, and reading the results honestly.
-applies_to: [main, composer]
 ---
 # Modeling with `run_modeling`
 

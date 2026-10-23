@@ -43,12 +43,20 @@ def test_the_spec(spec):
     assert {name: (port.artifact_type, port.required) for name, port in spec.inputs.items()} == {
         "summary": ("ResultSummary", True),
         "literature": ("LiteratureContext", False),
+        # The earlier steps' results: the read tools went with Phase 0.2.
+        "cohort": ("Cohort", False),
+        "masks": ("MaskSet", False),
+        "features": ("FeatureTable", False),
+        "modeling": ("ModelingOutput", False),
     }
+    assert spec.inputs["features"].many
     assert spec.outputs["report"].artifact_type == "ReportDocument"
     # The legacy prompt asked for a flag it could not raise, and for model
     # tables it could not read.
     assert {"scratchpad_raise_flag", "get_modeling_results", "latex_to_pdf"} <= set(spec.allowed_tools)
-    assert "read_agent_task_context" not in spec.allowed_tools
+    removed = {"read_agent_task_context", "read_all_agent_outputs", "scratchpad_read_report"}
+    assert not removed & set(spec.allowed_tools)
+    assert spec.skills == ("reporting",)
     assert (spec.max_tool_iterations, spec.max_completion_retries) == (25, 2)
     assert spec.ui == "latex_output"
 

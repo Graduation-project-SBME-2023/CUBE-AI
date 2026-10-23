@@ -45,7 +45,6 @@ def test_the_spec(spec):
     assert spec.kind == "execution"
     assert spec.allowed_tools == (
         "get_modeling_results",
-        "scratchpad_read_report",
         "scratchpad_write_note",
         "scratchpad_raise_flag",
         "scratchpad_write_summary",
@@ -54,19 +53,24 @@ def test_the_spec(spec):
     assert {name: port.artifact_type for name, port in spec.inputs.items()} == {
         "modeling": "ModelingOutput",
         "features": "FeatureTable",
+        "cohort": "Cohort",
+        "masks": "MaskSet",
     }
-    assert spec.inputs["modeling"].required and not spec.inputs["features"].required
+    assert spec.inputs["modeling"].required
+    assert not any(spec.inputs[name].required for name in ("features", "cohort", "masks"))
     assert spec.outputs["summary"].artifact_type == "ResultSummary"
     assert (spec.max_tool_iterations, spec.max_completion_retries) == (10, 2)
     assert spec.resources == frozenset({Resource.LLM})
     assert spec.resumable is True
-    assert spec.gates == frozenset() and not spec.delegates
+    assert not spec.delegates
+    assert spec.skills == ("reporting",)
     assert spec.ui == "report_output"
 
 
 def test_the_prompt_starts_from_the_node_inputs(spec):
     assert "Node inputs" in spec.system_prompt
     assert "scratchpad_read_agent" not in spec.system_prompt
+    assert "scratchpad_read_report" not in spec.system_prompt  # removed in Phase 0.2
 
 
 # --- output contract

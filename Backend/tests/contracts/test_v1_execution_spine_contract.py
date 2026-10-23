@@ -295,17 +295,18 @@ def test_the_scratchpad_is_the_run_not_a_json_file():
     assert "SCRATCHPAD_FILE" not in source
     assert "/runs/" in source
     assert "run_id()" in source  # the run comes from the tool context
-    # The MCP signatures are unchanged so the agents' prompts keep working.
+    # The signatures of the tools that stay are unchanged. The lifecycle and
+    # read tools are gone (Phase 0.2): the Node Runner owns a run's status,
+    # and an agent reads upstream results from its Node inputs.
+    for tool in ("scratchpad_write_note", "scratchpad_raise_flag", "scratchpad_write_summary"):
+        assert f"async def {tool}(" in source
     for tool in (
         "scratchpad_register_agent",
-        "scratchpad_write_note",
-        "scratchpad_raise_flag",
         "scratchpad_set_status",
-        "scratchpad_write_summary",
         "scratchpad_read_agent",
         "scratchpad_read_report",
     ):
-        assert f"async def {tool}(" in source
+        assert f"async def {tool}(" not in source
 
 
 def test_agent_output_is_the_run_not_a_json_file():
@@ -324,15 +325,6 @@ def test_agent_output_is_the_run_not_a_json_file():
     assert "output_path.write_text" not in segmentation
     assert "write_agent_output" in segmentation
     assert "does not fall back to a workspace file" in segmentation
-
-
-def test_task_context_reads_the_run(monkeypatch):
-    source = _source(TOOLPACKS_ROOT / "bookkeeping" / "task_context.py")
-    # The run row, through the Application API (domain_api names the /runs/ routes).
-    assert "domain_api.get_run()" in source and "domain_api.run_by_target(" in source
-    assert "compiled_prompt" in source
-    assert "/task-messages/" not in source
-    assert "steps_sharing_this_agent_type" in source
 
 
 # ----------------------------------------------------------------------

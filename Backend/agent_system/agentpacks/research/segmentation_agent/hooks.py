@@ -1,6 +1,7 @@
 """Hooks of ``segmentation_agent`` (see ``toolkit/agents/loader.py``).
 
-- ``output_contract``: the reviewed batch the agent finishes with;
+- ``output_contract``: the reviewed (or automatically accepted) batch the
+  agent finishes with;
 - ``completion_check``: the batch is this run's and reviewed, and the counts
   the agent reports are the ones ``run_segmentation_with_guard`` recorded on
   the run (the tool, not the model, writes this step's output);
@@ -8,7 +9,9 @@
 
 The agent is thin on purpose: the clinical decisions happen inside the tool,
 through the two internal agents. It exists because only an agent node can
-suspend on the ``segmentation_review`` gate (Phase 9.3).
+suspend: when the user asked to review the masks, the agent asks with
+``ask_user(form="segmentation_review")`` (Phase 9.3); otherwise the batch is
+``auto_accepted`` (D28). Both count as reviewed.
 """
 
 from __future__ import annotations
@@ -20,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..._runtime import ExtractedArtifact, ToolContext, domain_api
 
-REVIEWED = "submitted"
+# Reviewed by the radiologist, or accepted automatically when no review was asked for.
+REVIEWED = ("submitted", "auto_accepted")
 TOOL_OUTPUT_STATUSES = ("completed", "partial")
 
 
@@ -32,7 +36,7 @@ class SegmentedMasks(BaseModel):
     segmentation_batch_id: UUID
     n_masks: int = Field(ge=0, description="The accepted masks (accepted_count).")
     n_failed: int = Field(ge=0, description="The volumes that failed.")
-    review_status: Literal["not_ready", "pending", "submitting", "submitted"]
+    review_status: Literal["not_ready", "pending", "submitting", "submitted", "auto_accepted"]
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -95,7 +99,7 @@ async def completion_check(ctx: ToolContext, output: SegmentedMasks | None) -> l
             f"the batch's review status is {batch.get('review_status')}, not "
             f"{output.review_status}: report the recorded status"
         )
-    elif output.review_status != REVIEWED:
+    elif output.review_status not in REVIEWED:
         issues.append(
             "the masks are not reviewed yet, so no later step may use them: report the "
             "failure with scratchpad_raise_flag"

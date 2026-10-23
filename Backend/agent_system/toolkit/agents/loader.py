@@ -11,7 +11,8 @@ Every agent is a directory ``agentpacks/<pack>/<agent_type>/`` holding:
   ``context_builder``   ``(task, inputs, ctx) -> str``: the "Node inputs" message
   ``allowed_tools_fn``  ``(ctx, tools) -> names``; replaces a fixed ``allowed_tools``
   ``output_contract``   the pydantic model the agent's final output must match
-  ``build_graph``       ``(ctx) -> StateGraph`` of a ``workflow`` agent (Phase 9.6)
+  ``on_complete``       async ``(ctx, output) -> output``: records what the
+                        output names, once the check passes (Phase 10.1)
   ``extract_<port>``    the ``extract`` of the output port ``<port>``
   ===================== ==========================================================
 
@@ -25,6 +26,12 @@ Every agent is a directory ``agentpacks/<pack>/<agent_type>/`` holding:
 Output ports are written ``Type``, ``Type[]`` (many) and ``Type?`` (optional),
 the same labels ``catalog.index()`` shows. Every problem is raised as an
 ``AgentFileError`` that names the file.
+
+The front matter carries the Claude Agent SDK fields too (``effort``,
+``skills``, ``max_budget_usd``, ``gate_timeout_s``; see ``AgentSpec``). The
+fields of the design before the SDK (``gates``, ``workflow``,
+``human_in_the_loop``, ``max_context_tokens``) are refused with a message
+that names what replaced them.
 """
 
 from __future__ import annotations
@@ -52,15 +59,27 @@ HOOK_NAMES = (
     "context_builder",
     "allowed_tools_fn",
     "output_contract",
-    "build_graph",
+    "on_complete",
 )
 EXTRACT_PREFIX = "extract_"
 
 # Fields an author may reach for that do not belong in the front matter.
 _MISPLACED = {
-    "human_in_the_loop": "it is derived from gates",
     "system_prompt": "the body of agent.md is the system prompt",
     **{name: "define it in hooks.py" for name in HOOK_NAMES if name != "allowed_tools_fn"},
+}
+# Fields of the design before the Claude Agent SDK, and what replaced them.
+_RETIRED = {
+    "gates": (
+        "there is no fixed gate inside a node (D28); the agent asks with ask_user "
+        "or AskUserQuestion only when the node instructions say the user wants it"
+    ),
+    "human_in_the_loop": "questions are AskUserQuestion and the ask_user forms (Phase 9.3)",
+    "workflow": (
+        "list the internal agents under delegates: they are SDK subagents, "
+        "used in any order (Phase 9.6)"
+    ),
+    "max_context_tokens": "the SDK compacts the session by itself",
 }
 
 _PORT_LABEL = re.compile(r"^(?P<type>[A-Za-z_][A-Za-z0-9_]*)(?P<many>\[\])?(?P<optional>\?)?$")
@@ -90,19 +109,19 @@ class AgentFrontMatter(BaseModel):
     model_profile: str = DEFAULT_MODEL_PROFILE
     allowed_tools: list[str] = Field(default_factory=list)
     delegates: list[str] = Field(default_factory=list)
-    workflow: list[str] = Field(default_factory=list)
     inputs: dict[str, str] = Field(default_factory=dict)
     outputs: dict[str, str] = Field(default_factory=dict)
     max_tool_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS
     timeout_s: float = DEFAULT_TIMEOUT_S
+    max_budget_usd: float | None = None
     resources: list[str] = Field(default_factory=lambda: ["llm"])
     max_completion_retries: int = 0
     ui: str | None = None
     parent: str | None = None
     resumable: bool | None = None
-    gates: list[str] = Field(default_factory=list)
     gate_timeout_s: float | None = None
-    max_context_tokens: int | None = None
+    effort: str | None = None
+    skills: list[str] = Field(default_factory=list)
 
 
 def load_agent_file(path: Path, package: str | None = None) -> AgentSpec:
@@ -156,6 +175,9 @@ def _front_matter(path: Path, data: dict[str, Any]) -> AgentFrontMatter:
     for name, reason in _MISPLACED.items():
         if name in data:
             raise AgentFileError(path, f"{name!r} is not a front matter field: {reason}")
+    for name, replacement in _RETIRED.items():
+        if name in data:
+            raise AgentFileError(path, f"{name!r} is no longer a front matter field: {replacement}")
     try:
         return AgentFrontMatter.model_validate(data)
     except ValidationError as exc:

@@ -5,8 +5,10 @@ Every agent is a directory ``<pack>/<agent_type>/`` with an ``agent.md``
 ``toolkit/agents/loader.py`` for both formats. ``catalog.build()`` finds the
 files, so there is no central list: a new agent is picked up by being here.
 
-- ``core/``: the control agents (``main_agent``, ``composer``, ``recovery_agent``);
-- ``research/``: the execution agents and their internal agents.
+- ``core/``: the Main Agent (``main_agent``) and its two SDK subagents
+  (``composer``, ``recovery_agent``);
+- ``research/``: the execution agents and their internal agents (their SDK
+  subagents).
 
 Hooks import the toolkit and the tool packs' helpers through
 ``agentpacks._runtime``, never by an absolute name (see that module for why).

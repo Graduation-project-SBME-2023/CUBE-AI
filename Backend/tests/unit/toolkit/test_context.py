@@ -49,9 +49,8 @@ def test_defaults_and_normalisation():
     assert ctx.caller is Caller.MAIN
     assert ctx.execution_mode is ExecutionMode.AUTO
     assert ctx.privacy_mode is PrivacyMode.STANDARD
-    assert ctx.depth == 0
     assert ctx.node_id is ctx.run_id is ctx.attempt_id is ctx.job_id is None
-    assert ctx.event_sink is ctx.session_handle is ctx.mailbox is None
+    assert ctx.event_sink is ctx.session_handle is ctx.cancel is None
     assert _ctx().workspace_dir == Path("/storage/hypotheses/workspace_x")
 
 
@@ -68,8 +67,6 @@ def test_context_is_immutable():
         ({"caller": "planner"}, "caller='planner'"),
         ({"execution_mode": "manual"}, "execution_mode="),
         ({"privacy_mode": "private"}, "privacy_mode="),
-        ({"depth": -1}, "depth"),
-        ({"depth": True}, "depth"),
     ],
 )
 def test_malformed_fields_are_refused(overrides, match):
@@ -96,14 +93,22 @@ def test_for_tool_sets_only_the_tool_name():
     assert ctx.tool_name is None
 
 
-def test_for_subagent_goes_one_level_deeper():
-    ctx = _ctx(tool_name="run_agent", depth=0)
+def test_for_subagent_tags_the_calls_of_an_sdk_subagent():
+    ctx = _ctx(tool_name="Agent")
 
     child = ctx.for_subagent("mask_resolution_agent")
 
-    assert (child.subagent, child.depth, child.tool_name) == ("mask_resolution_agent", 1, None)
+    assert (child.subagent, child.tool_name) == ("mask_resolution_agent", None)
     assert child.agent_type == "segmentation_agent"  # still the node's agent
-    assert child.for_subagent("clinical_target_intent_agent").depth == 2
+
+
+def test_the_fields_the_sdk_replaced_are_gone():
+    """The SDK caps the subagent depth, and a message to a running agent is
+    its streaming input (Phase 0.2)."""
+    with pytest.raises(TypeError):
+        _ctx(depth=1)
+    with pytest.raises(TypeError):
+        _ctx(mailbox=asyncio.Queue())
 
 
 # --- payload
@@ -117,13 +122,12 @@ def test_payload_is_json_and_leaves_out_live_objects():
         job_id="job-1",
         event_sink=_Sink(),
         session_handle=object(),
-        mailbox=asyncio.Queue(),
     )
 
     payload = ctx.to_payload()
 
     assert json.loads(json.dumps(payload)) == payload
-    assert not {"event_sink", "session_handle", "mailbox"} & payload.keys()
+    assert not {"event_sink", "session_handle", "cancel"} & payload.keys()
     assert payload["caller"] == "node"
     assert payload["execution_mode"] == "plan"
     assert payload["privacy_mode"] == "phi_local"
@@ -217,5 +221,5 @@ def test_two_sessions_never_see_each_others_context():
 
 
 def test_copy_replace_revalidates():
-    with pytest.raises(ValueError, match="depth"):
-        copy.replace(_ctx(), depth=-1)
+    with pytest.raises(ValueError, match="caller"):
+        copy.replace(_ctx(), caller="planner")

@@ -10,12 +10,11 @@ context.
 A job (Plan 5) runs in another process: the context crosses over as
 ``to_payload()`` and is rebuilt with ``from_payload()``. The payload is JSON
 and leaves out the live objects (``event_sink``, ``session_handle``,
-``mailbox``, ``cancel``); the worker attaches its own.
+``cancel``); the worker attaches its own.
 """
 
 from __future__ import annotations
 
-import asyncio
 import copy
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -52,7 +51,7 @@ class PrivacyMode(StrEnum):
 
 
 # The live objects; they never enter the payload.
-LIVE_FIELDS: frozenset[str] = frozenset({"event_sink", "session_handle", "mailbox", "cancel"})
+LIVE_FIELDS: frozenset[str] = frozenset({"event_sink", "session_handle", "cancel"})
 
 
 class NoToolContextError(RuntimeError):
@@ -70,8 +69,7 @@ class ToolContext:
     run_id: str | None = None  # the node_runs row of the current node
     attempt_id: str | None = None  # the run_attempts row: the D24 write fence
     agent_type: str | None = None  # the node's agent (or main_agent)
-    subagent: str | None = None  # the internal agent run_agent started
-    depth: int = 0  # run_agent nesting; capped by run_agent (MAX_AGENT_DEPTH)
+    subagent: str | None = None  # the SDK subagent making the call, if any
     workspace_dir: Path | None = None
     tool_name: str | None = None  # the tool being called
     job_id: str | None = None
@@ -81,7 +79,6 @@ class ToolContext:
     # --- live objects: excluded from the payload, equality and repr
     event_sink: EventSink | None = field(default=None, compare=False, repr=False)
     session_handle: Any = field(default=None, compare=False, repr=False)
-    mailbox: asyncio.Queue[str] | None = field(default=None, compare=False, repr=False)
     # The call's cancel token, set by dispatch: long work can check it or pass it down.
     cancel: CancelToken | None = field(default=None, compare=False, repr=False)
 
@@ -94,8 +91,6 @@ class ToolContext:
         _set("caller", coerce_enum(Caller, self.caller, "caller"))
         _set("execution_mode", coerce_enum(ExecutionMode, self.execution_mode, "execution_mode"))
         _set("privacy_mode", coerce_enum(PrivacyMode, self.privacy_mode, "privacy_mode"))
-        if isinstance(self.depth, bool) or not isinstance(self.depth, int) or self.depth < 0:
-            raise ValueError("depth must be an int >= 0")
         if self.workspace_dir is not None:
             _set("workspace_dir", Path(self.workspace_dir))
 
@@ -107,8 +102,8 @@ class ToolContext:
         return copy.replace(self, tool_name=tool_name, cancel=cancel or self.cancel)
 
     def for_subagent(self, agent_type: str) -> ToolContext:
-        """The context of an internal agent started with run_agent: one level deeper."""
-        return copy.replace(self, subagent=agent_type, depth=self.depth + 1, tool_name=None)
+        """The context of a call made by an SDK subagent (the SDK caps the depth)."""
+        return copy.replace(self, subagent=agent_type, tool_name=None)
 
     # --- crossing a process boundary
 
@@ -133,7 +128,6 @@ class ToolContext:
         *,
         event_sink: EventSink | None = None,
         session_handle: Any = None,
-        mailbox: asyncio.Queue[str] | None = None,
         cancel: CancelToken | None = None,
     ) -> ToolContext:
         """Rebuild a context from ``to_payload()``, attaching this side's live objects."""
@@ -145,7 +139,6 @@ class ToolContext:
             **payload,
             event_sink=event_sink,
             session_handle=session_handle,
-            mailbox=mailbox,
             cancel=cancel,
         )
 

@@ -1,9 +1,9 @@
 """Hooks of ``study_population_planner_agent`` (see ``toolkit/agents/loader.py``).
 
-- ``output_contract``: the approved cohort the agent finishes with;
+- ``output_contract``: the frozen cohort the agent finishes with;
 - ``completion_check``: the durable handoff of ``services/population_handoff.py``
   (copied, the legacy module stays with the frozen pipeline), on the new
-  runtime: the cohort is this run's, anatomy-validated, approved and
+  runtime: the cohort is this run's, anatomy-validated, frozen and
   labelled, at the size the agent reports. The legacy ``status == done``
   check is gone: the Node Runner owns the run's status now;
 - ``extract_cohort``: the ``cohort`` output port.
@@ -25,7 +25,7 @@ from ..._runtime import ExtractedArtifact, ToolContext, domain_api
 AGENT_OUTPUT_STATUSES = ("completed",)
 
 
-class ApprovedCohort(BaseModel):
+class FrozenCohort(BaseModel):
     """The final answer, checked by the engine before the agent may finish."""
 
     model_config = ConfigDict(extra="forbid")
@@ -38,16 +38,16 @@ class ApprovedCohort(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-output_contract = ApprovedCohort
+output_contract = FrozenCohort
 
 
-async def completion_check(ctx: ToolContext, output: ApprovedCohort | None) -> list[str]:
+async def completion_check(ctx: ToolContext, output: FrozenCohort | None) -> list[str]:
     """Every missing or invalid record that makes the handoff unsafe. An
     unreachable Application API propagates and fails the attempt."""
     if not ctx.run_id:
         return ["this agent is not running inside a node; there is no run to record on"]
     if output is None:
-        return ["finish with the approved cohort in the required structured format"]
+        return ["finish with the frozen cohort in the required structured format"]
 
     run_id = str(ctx.run_id)
     issues = []
@@ -72,7 +72,7 @@ async def completion_check(ctx: ToolContext, output: ApprovedCohort | None) -> l
     return issues
 
 
-async def _cohort_issues(cohort: dict[str, Any], output: ApprovedCohort) -> list[str]:
+async def _cohort_issues(cohort: dict[str, Any], output: FrozenCohort) -> list[str]:
     issues = []
     if str(cohort.get("cohort_id")) != str(output.cohort_id):
         issues.append(
@@ -89,24 +89,25 @@ async def _cohort_issues(cohort: dict[str, Any], output: ApprovedCohort) -> list
         issues.append("the cohort is empty: at least one volume is required")
     if not cohort.get("frozen_at"):
         issues.append(
-            "the doctor has not approved the cohort: call generate_targets and wait for it"
+            "the cohort is not frozen: call generate_targets (after ask_user when the "
+            "user asked to approve it)"
         )
         return issues
     labelled = len(await domain_api.cohort_analysis_rows(str(cohort["cohort_id"])))
     if labelled == 0:
-        issues.append("the approved cohort has no labelled volume")
+        issues.append("the frozen cohort has no labelled volume")
     elif labelled != output.cohort_size:
         issues.append(
-            f"the approved cohort has {labelled} labelled volumes, not {output.cohort_size}: "
+            f"the frozen cohort has {labelled} labelled volumes, not {output.cohort_size}: "
             "report the final_cohort_size generate_targets returned"
         )
     return issues
 
 
 def extract_cohort(result: Any) -> ExtractedArtifact:
-    """The approved ``Cohort``, from the checked output. The label counts are
+    """The frozen ``Cohort``, from the checked output. The label counts are
     not the model's to report, so the summary leaves them out."""
-    output = ApprovedCohort.model_validate(result.output)
+    output = FrozenCohort.model_validate(result.output)
     return ExtractedArtifact(
         ref={"cohort_id": str(output.cohort_id)},
         summary={"size": output.cohort_size, "frozen": True},

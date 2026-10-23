@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 
 from agent_system.toolkit.agents.loader import AgentFileError, load_agent_file
-from agent_system.toolkit.agents.spec import AgentKind
+from agent_system.toolkit.agents.spec import AgentKind, Effort
 from agent_system.toolkit.catalog import build
-from agent_system.toolkit.manifest import Gate, Resource
+from agent_system.toolkit.manifest import Resource
 from agent_system.toolkit.ports import ExtractedArtifact
 
 pytestmark = pytest.mark.unit
@@ -115,19 +115,20 @@ def test_every_front_matter_field(pack):
         kind: execution
         description: Segments the cohort.
         model_profile: agent_default
-        allowed_tools: [run_segmentation_with_guard, list_models, run_agent]
+        allowed_tools: [run_segmentation_with_guard, list_models]
         delegates: [mask_resolution_agent]
         inputs: {cohort: Cohort}
         outputs: {masks: "MaskSet[]", extra: "ImageSet[]?"}
         max_tool_iterations: 6
         timeout_s: 10800
+        max_budget_usd: 4.5
         resources: [llm]
         max_completion_retries: 1
         ui: segmentation_view
         resumable: true
-        gates: [segmentation_review]
         gate_timeout_s: 86400
-        max_context_tokens: 60000
+        effort: high
+        skills: [segmentation_choices]
         ---
         Segment.
         """,
@@ -153,10 +154,10 @@ def test_every_front_matter_field(pack):
     assert spec.timeout_s == 10800
     assert spec.max_completion_retries == 1
     assert spec.ui == "segmentation_view"
-    assert spec.gates == frozenset({Gate.SEGMENTATION_REVIEW})
-    assert spec.human_in_the_loop is True
+    assert spec.max_budget_usd == 4.5
     assert spec.gate_timeout_s == 86400
-    assert spec.max_context_tokens == 60000
+    assert spec.effort is Effort.HIGH
+    assert spec.skills == ("segmentation_choices",)
 
 
 def test_every_hook_is_attached(pack):
@@ -188,6 +189,9 @@ def test_every_hook_is_attached(pack):
         def context_builder(task, inputs, ctx):
             return task
 
+        async def on_complete(ctx, output):
+            return output
+
         def allowed_tools_fn(ctx, tools):
             return ["generate_targets"]
 
@@ -202,11 +206,12 @@ def test_every_hook_is_attached(pack):
     assert spec.tools_for(None, []) == ("generate_targets",)
     assert spec.completion_check.__name__ == "completion_check"
     assert spec.context_builder("task", {}, None) == "task"
+    assert spec.on_complete.__name__ == "on_complete"
     assert spec.output_contract.__name__ == "output_contract"
     assert spec.outputs["cohort"].extract is not None
 
 
-def test_a_workflow_agent_gets_build_graph_from_its_hooks(pack):
+def test_the_internal_agents_of_an_agent_are_its_delegates(pack):
     name, write = pack
     path = write(
         "agentpacks/research/literature_review_agent/agent.md",
@@ -215,20 +220,14 @@ def test_a_workflow_agent_gets_build_graph_from_its_hooks(pack):
         agent_type: literature_review_agent
         kind: execution
         description: Reviews the literature.
-        workflow: [pico_analyst, query_builder]
+        delegates: [pico_analyst, query_builder]
         ---
         Review.
         """,
-    )
-    write(
-        "agentpacks/research/literature_review_agent/hooks.py",
-        "def build_graph(ctx):\n    return object()\n",
+        package=False,
     )
 
-    spec = _load(name, path)
-
-    assert spec.workflow == ("pico_analyst", "query_builder")
-    assert spec.build_graph.__name__ == "build_graph"
+    assert load_agent_file(path).delegates == ("pico_analyst", "query_builder")
 
 
 def test_a_directory_without_hooks_needs_no_package(pack):
@@ -260,7 +259,7 @@ def test_a_directory_without_hooks_needs_no_package(pack):
     [
         ("agent_type: result_reporter_agent", "agent_type: result_agent", "must match its directory name"),
         ("allowed_tools:", "alowed_tools:", "alowed_tools: Extra inputs are not permitted"),
-        ("kind: execution\n", "kind: execution\nhuman_in_the_loop: true\n", "derived from gates"),
+        ("kind: execution\n", "kind: execution\nhuman_in_the_loop: true\n", "AskUserQuestion and the ask_user forms"),
         ("kind: execution\n", "kind: execution\ncompletion_check: x\n", "define it in hooks.py"),
         ("kind: execution\n", "kind: execution\nsystem_prompt: x\n", "body of agent.md"),
         ("kind: execution\n", "kind: execution\nmax_tool_iterations: '12'\n", "max_tool_iterations: Input should be a valid integer"),
@@ -269,8 +268,14 @@ def test_a_directory_without_hooks_needs_no_package(pack):
         ("description: Judges the hypothesis from the modeling results.\n", "", "description: Field required"),
         ("summary: ResultSummary", "summary: Result Summary", "'Result Summary' is not Type, Type\\[\\] or Type\\?"),
         ("summary: ResultSummary", "summary: ResultSummary[]!", "is not Type"),
-        ("kind: execution\n", "kind: execution\ngates: [manual_review]\n", "gates='manual_review'"),
-        ("kind: execution\n", "kind: execution\ngates: [tool_approval]\n", "implicit gates"),
+        ("kind: execution\n", "kind: execution\ngates: [cohort_approval]\n", "no fixed gate inside a node"),
+        ("kind: execution\n", "kind: execution\nworkflow: [pico_analyst]\n", "list the internal agents under delegates"),
+        ("kind: execution\n", "kind: execution\nmax_context_tokens: 60000\n", "the SDK compacts the session"),
+        ("kind: execution\n", "kind: execution\nbuild_graph: x\n", "build_graph: Extra inputs are not permitted"),
+        ("kind: execution\n", "kind: execution\neffort: extreme\n", "effort='extreme'"),
+        ("kind: execution\n", "kind: execution\nmax_budget_usd: '2'\n", "max_budget_usd: Input should be a valid number"),
+        ("allowed_tools: [get_modeling_results]", "allowed_tools: [get_modeling_results, ask_user]", "implicitly"),
+        ("allowed_tools: [get_modeling_results]", "allowed_tools: [TaskCreate]", "implicitly"),
         ("allowed_tools: [get_modeling_results]", "allowed_tools: [a, a]", "more than once"),
         ("You judge the hypothesis.\n\nRead the Node inputs first.\n", "", "system_prompt must not be empty"),
     ],

@@ -1,16 +1,13 @@
-"""What each step of the literature review hands to the next (merged plan,
-Phases 3.3 and 9.6).
+"""What the literature review's subagents answer with (merged plan, Phases
+3.3 and 9.6).
 
-The review is a fixed graph::
-
-    pico_analyst -> query_builder -> search_executor (one branch per database)
-                 -> relevance_ranker (one branch per paper) -> context_compiler
-
-Each internal agent's ``output_contract`` is one of these models, so the
-engine checks a step's answer before the next step reads it, and
-``hooks.build_graph`` (Phase 9.6) wires the steps with them. The steps read
-plenty of free text, so the models ignore fields they do not name rather than
-refuse an answer for an extra key; what the next step needs is required.
+The review is an ordinary agent; its five internal agents are optional SDK
+subagents, used in any order and several at once (one ``search_executor`` per
+database, one ``relevance_ranker`` per paper). Each one's ``output_contract``
+is one of these models, and ``CompiledContext`` is also what the review itself
+reports. The answers carry plenty of free text, so the models ignore fields
+they do not name rather than refuse an answer for an extra key; what the
+review needs is required.
 """
 
 from __future__ import annotations

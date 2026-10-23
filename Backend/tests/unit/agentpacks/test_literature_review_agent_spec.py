@@ -1,10 +1,11 @@
-"""literature_review_agent and its five workflow steps, as loaded from
+"""literature_review_agent and its five SDK subagents, as loaded from
 agentpacks/ (merged plan, Phases 3.2 and 3.3)."""
 
 from __future__ import annotations
 
 import asyncio
 import functools
+import json
 
 import httpx
 import pytest
@@ -15,7 +16,9 @@ from agent_system.toolkit.agents.engine import AgentResult, AgentStatus
 from agent_system.toolkit.agents.spec import AgentKind
 from agent_system.toolkit.artifacts.builtin import LITERATURE_CONTEXT
 from agent_system.toolkit.catalog import build
-from tests.support.toolkit_fixtures import TEST_SESSION_ID, make_context
+from agent_system.toolkit.context import use_context
+from agent_system.toolpacks.literature import run_state
+from tests.support.toolkit_fixtures import TEST_SESSION_ID, FakeEventSink, make_context
 
 pytestmark = pytest.mark.unit
 
@@ -23,6 +26,11 @@ STEPS = ("pico_analyst", "query_builder", "search_executor", "relevance_ranker",
 RUN_ID = "7d1f4c2e-0000-4000-8000-000000000006"
 REVIEW_ID = "11111111-0000-4000-8000-0000000000d1"
 RECORDED = {"literature_review_id": REVIEW_ID, "n_papers": 2, "highly_relevant": 1}
+COMPILED = {
+    "files_saved": list(contracts.REVIEW_FILES), "papers_reviewed": 3, "highly_relevant": 1,
+    "similar_studies": 0, "summary": "3 papers; the top one scores 87.5.",
+}  # fmt: skip
+SEARCH_TOOLS = ("search_pubmed", "search_arxiv", "search_semantic_scholar", "search_europe_pmc")
 
 
 @functools.cache
@@ -35,21 +43,36 @@ def spec():
     return _catalog().agents.get("literature_review_agent")
 
 
-# --- the workflow agent
+# --- an ordinary agent with optional subagents
 
 
 def test_the_spec(spec):
     assert spec.kind is AgentKind.EXECUTION
-    assert spec.inputs == {}  # the PICO comes from the node's params
+    assert spec.inputs == {}  # the PICO comes from the task
     assert spec.outputs["literature"].artifact_type == "LiteratureContext"
-    assert spec.workflow == STEPS
-    assert spec.delegates == () and spec.allowed_tools == ()
-    assert spec.resumable is True  # a resume continues inside the step it stopped in
+    # It may do every part itself, or hand parts to its subagents in any order.
+    assert spec.allowed_tools == (*SEARCH_TOOLS, "score_paper_relevance", "save_literature_output")
+    assert spec.delegates == STEPS
+    assert spec.output_contract is contracts.CompiledContext
+    assert spec.resumable is True  # a retry resumes its saved SDK session
+    assert not hasattr(spec, "workflow") and not hasattr(spec, "build_graph")
 
 
-def test_the_graph_is_built_with_the_engine(spec):
-    with pytest.raises(NotImplementedError, match="Phase 9.6"):
-        spec.build_graph(make_context(run_id=RUN_ID))
+def test_its_prompt_fixes_no_order(spec):
+    assert "nothing fixes the order" in spec.system_prompt
+    assert "several at once" in spec.system_prompt
+
+
+def test_the_context_builder_sets_the_runs_domain_keywords(spec):
+    task = (
+        "PICO: adults with renal cell carcinoma on contrast CT; radiomics with random forest "
+        "versus radiologist reading; malignancy."
+    )
+
+    assert spec.context_builder(task, {}, make_context(run_id=RUN_ID)) == task
+    keywords = run_state.keywords_for(RUN_ID)
+    run_state.release(RUN_ID)
+    assert keywords[:2] == ["Kidney", "Carcinoma"]  # the study's terms, not only the fallback
 
 
 @pytest.mark.parametrize(
@@ -69,13 +92,22 @@ def test_the_steps(step, contract, tools):
     assert (agent.kind, agent.parent) == (AgentKind.INTERNAL, "literature_review_agent")
     assert agent.output_contract is contract
     assert agent.allowed_tools == tools
-    assert agent.resumable is False  # checkpointed in the parent's namespace
+    assert agent.resumable is False  # its transcript is stored with its parent's
+    assert agent.delegates == ()  # subagents run one level deep
 
 
 def test_every_database_has_a_search_tool_the_executor_may_use():
     executor = _catalog().agents.get("search_executor")
 
     assert set(contracts.DATABASE_TOOLS.values()) == set(executor.allowed_tools)
+
+
+@pytest.mark.parametrize("step", ["search_executor", "relevance_ranker"])
+def test_the_parallel_subagents_say_so(step):
+    agent = _catalog().agents.get(step)
+
+    assert "several may run at once" in agent.description
+    assert "branch" not in agent.system_prompt
 
 
 # --- the prompts: generic, fixed, and free of the AutoGen chat
@@ -161,48 +193,96 @@ def test_the_compiler_must_save_every_file():
         contracts.CompiledContext.model_validate(answer)
 
 
-# --- the literature port and the completion check
+# --- the completion check, the record, and the literature port
 
 
-def test_extract_literature(spec):
-    result = AgentResult(status=AgentStatus.COMPLETED, output=RECORDED)
+def _captured(**files):
+    run_state.release(RUN_ID)
+    for name, content in files.items():
+        run_state.capture(RUN_ID, name, content)
+
+
+def _check(spec, output=COMPILED):
+    parsed = None if output is None else spec.output_contract.model_validate(output)
+    return asyncio.run(spec.completion_check(make_context(run_id=RUN_ID), parsed))
+
+
+def test_complete_once_every_file_is_saved(spec):
+    _captured(**{name: "x" for name in contracts.REVIEW_FILES})
+    try:
+        assert _check(spec) == []
+    finally:
+        run_state.release(RUN_ID)
+
+
+def test_a_missing_file_is_named(spec):
+    _captured(**{"literature_report.md": "x", "context.json": "{}"})
+    try:
+        (issue,) = _check(spec)
+    finally:
+        run_state.release(RUN_ID)
+
+    assert "ranked_papers.json is not saved" in issue
+
+
+def test_without_a_structured_answer(spec):
+    (issue,) = _check(spec, output=None)
+
+    assert "required format" in issue
+
+
+PAPERS = [
+    {"title": "Renal radiomics", "authors": "A. One, B. Two", "year": "2023", "pmid": "123",
+     "relevance_score": 87.5, "tier": "highly_relevant", "similar_study": True},
+    {"title": "CT texture", "doi": "10.1/x", "year_numeric": 2021},
+    {"title": "No identifier"},
+]  # fmt: skip
+
+
+def _record(spec, fake_domain_api, sink=None):
+    _captured(**{
+        "literature_report.md": "# Report",
+        "context.json": json.dumps({"metadata": {"pico": {"population": "adults"}}}),
+        "ranked_papers.json": json.dumps(PAPERS),
+    })
+    created = fake_domain_api.post("/literature-reviews/").respond(
+        201, json={"literature_review_id": REVIEW_ID}
+    )
+    papers = fake_domain_api.post(f"/literature-reviews/{REVIEW_ID}/papers").respond(200, json={})
+    ctx = make_context(run_id=RUN_ID, attempt_id="att-1", event_sink=sink)
+    with use_context(ctx):
+        output = asyncio.run(spec.on_complete(ctx, COMPILED))
+    return output, created, papers
+
+
+def test_on_complete_records_the_review_under_the_run(spec, fake_domain_api):
+    sink = FakeEventSink()
+    output, created, papers = _record(spec, fake_domain_api, sink)
+
+    review = json.loads(created.calls.last.request.content)
+    assert (review["session_id"], review["review_key"]) == (TEST_SESSION_ID, RUN_ID)
+    assert review["query"] == {"population": "adults"}
+    recorded = json.loads(papers.calls.last.request.content)
+    assert [paper["title"] for paper in recorded] == ["Renal radiomics", "CT texture"]
+    assert recorded[0]["authors"] == ["A. One", "B. Two"] and recorded[0]["year"] == 2023
+    assert recorded[1]["year"] == 2021
+    # The write declares its D24 path, like every write on the execution path.
+    assert created.calls.last.request.headers["X-Attempt-Id"] == "att-1"
+    assert output == RECORDED | {"warnings": []}
+    # LiteratureReviewView keeps working: the same view the planner used to send.
+    (view,) = sink.views
+    assert view.type == "lit_review_output"
+    assert view.payload["report"] == "# Report"
+    # The files are handed over once.
+    assert run_state.captured_outputs(RUN_ID) == {}
+
+
+def test_extract_literature(spec, fake_domain_api):
+    output, _, _ = _record(spec, fake_domain_api)
+    result = AgentResult(status=AgentStatus.COMPLETED, output=output)
 
     (artifact,) = spec.outputs["literature"].extract_artifacts(result)
 
     assert dict(artifact.ref) == {"literature_review_id": REVIEW_ID}
     assert dict(artifact.summary) == {"n_papers": 2}
     LITERATURE_CONTEXT.validate_artifact(artifact)
-
-
-def _review(**fields):
-    return {"literature_review_id": REVIEW_ID, "session_id": TEST_SESSION_ID,
-            "review_key": RUN_ID, "papers": [{"title": "a"}, {"title": "b"}]} | fields
-
-
-def _check(spec, fake_domain_api, review):
-    route = fake_domain_api.get(f"/literature-reviews/{REVIEW_ID}")
-    if review is None:
-        route.mock(return_value=httpx.Response(404, json={"detail": "not found"}))
-    else:
-        route.mock(return_value=httpx.Response(200, json=review))
-    parsed = spec.output_contract.model_validate(RECORDED)
-    return asyncio.run(spec.completion_check(make_context(run_id=RUN_ID), parsed))
-
-
-def test_complete_when_this_runs_review_is_recorded(spec, fake_domain_api):
-    assert _check(spec, fake_domain_api, _review()) == []
-
-
-@pytest.mark.parametrize(
-    ("review", "expected"),
-    [
-        (None, "does not exist"),
-        (_review(review_key="planner-review"), "not recorded by this run"),
-        (_review(session_id="another-session"), "not recorded by this run"),
-        (_review(papers=[{"title": "a"}]), "records 1 papers, not 2"),
-    ],
-)
-def test_what_is_wrong_is_named(spec, fake_domain_api, review, expected):
-    (issue,) = _check(spec, fake_domain_api, review)
-
-    assert expected in issue

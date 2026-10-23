@@ -1,5 +1,5 @@
 """A cancel token: lets the Executor stop one node's work without cancelling
-the task that runs it. Dispatch, agent engines, ``run_agent`` and the job
+the task that runs it. Dispatch, agent engines and the job
 runtime (Plan 5) all watch the same token."""
 
 from __future__ import annotations

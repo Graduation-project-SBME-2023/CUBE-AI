@@ -43,7 +43,6 @@ from ..manifest import (
 from ..ports import PortSpec, freeze_ports
 
 if TYPE_CHECKING:
-    from ..agents.spec import AgentSpec
     from ..context import ToolContext
     from ..events import ViewEvent
 
@@ -54,9 +53,6 @@ type ToolHandler = Callable[..., Awaitable[Any]]
 # Turns a successful result into the UI view events the EventSink sends. Async,
 # because the legacy hooks it replaces read the agent output over HTTP.
 type OnResultHook = Callable[[Any, ToolContext], Awaitable[Sequence[ViewEvent]]]
-# Specializes the tool for the agent that gets it; run_agent narrows its
-# agent_type enum to that agent's own delegates.
-type CallerBinding = Callable[[ToolSpec, AgentSpec], ToolSpec]
 
 
 @dataclass(frozen=True, eq=False, kw_only=True)
@@ -100,7 +96,6 @@ class ToolSpec:
     # --- UI
     ui: str | None = None  # view type for the node, e.g. "modeling_results_view"
     on_result: OnResultHook | None = None
-    for_caller: CallerBinding | None = None
 
     # --- budgets and retry cap
     timeout_s: float = DEFAULT_TIMEOUT_S
@@ -170,9 +165,8 @@ class ToolSpec:
 
         if self.ui is not None and (not isinstance(self.ui, str) or not self.ui.strip()):
             raise ValueError(f"tool {self.name!r}: ui must be a non-empty string or None")
-        for hook in ("on_result", "for_caller"):
-            if getattr(self, hook) is not None and not callable(getattr(self, hook)):
-                raise TypeError(f"tool {self.name!r}: {hook} must be callable")
+        if self.on_result is not None and not callable(self.on_result):
+            raise TypeError(f"tool {self.name!r}: on_result must be callable")
 
         if not self.timeout_s > 0:
             raise ValueError(f"tool {self.name!r}: timeout_s must be > 0")

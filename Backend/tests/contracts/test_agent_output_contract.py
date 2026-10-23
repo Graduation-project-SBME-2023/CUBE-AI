@@ -76,7 +76,7 @@ def _run(agent_type: str, position: int, status: str = "completed", warnings=())
 
 @pytest.mark.contract
 @pytest.mark.asyncio
-async def test_output_is_written_to_this_run_and_read_back(api):
+async def test_output_is_written_to_this_run(api):
     written = {}
 
     def _capture(request):
@@ -84,25 +84,9 @@ async def test_output_is_written_to_this_run_and_read_back(api):
         return httpx.Response(200, json=_run("segmentation_agent", 1))
 
     api.put(f"{API}/runs/{RUN_ID}/output").mock(side_effect=_capture)
-    api.get(
-        f"{API}/runs/session/{SESSION_ID}/by-target/segmentation_agent"
-    ).mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "run": _run("segmentation_agent", 1),
-                "nodes_sharing_this_target": 1,
-            },
-        )
-    )
 
     confirmation = json.loads(
         await module.write_agent_output(_input("segmentation_agent"))
-    )
-    stored = json.loads(
-        await module.read_agent_output(
-            module.ReadAgentOutputInput(agent_id="segmentation_agent")
-        )
     )
 
     assert confirmation["status"] == "ok"
@@ -113,13 +97,15 @@ async def test_output_is_written_to_this_run_and_read_back(api):
     assert written["status"] == "completed"
     assert written["summary"] == "Completed deterministic test work."
     assert "agent_id" not in written
-    assert stored["agent_id"] == "segmentation_agent"
-    assert stored["outputs"]["files"]["artifact"] == "outputs/artifact.json"
-    assert stored["outputs"]["metrics"]["count"] == 2
-    assert stored["timestamp"].endswith("+00:00")
-    assert stored["agent_run_id"] == RUN_ID
-    assert stored["step_order"] == 1
-    assert stored["steps_sharing_this_agent_type"] == 1
+    assert written["output_files"] == {"artifact": "outputs/artifact.json"}
+    assert written["output_metrics"] == {"count": 2}
+
+
+@pytest.mark.contract
+def test_the_read_tools_are_gone():
+    """An agent reads upstream results from its Node inputs (Phase 0.2)."""
+    assert not hasattr(module, "read_agent_output")
+    assert not hasattr(module, "read_all_agent_outputs")
 
 
 @pytest.mark.contract
@@ -130,61 +116,6 @@ async def test_an_agent_with_no_run_cannot_write_an_output(api):
 
     assert result["error_code"] == "no_run"  # an error_result, not JSON text
     assert "no run" in result["error_message"]
-
-
-@pytest.mark.contract
-@pytest.mark.asyncio
-async def test_aggregate_status_prioritizes_failure_then_partial(api):
-    runs = [
-        _run("study_population_planner_agent", 1, "completed"),
-        _run("feature_extraction_agent", 2, "partial"),
-    ]
-    route = api.get(f"{API}/runs/session/{SESSION_ID}").mock(
-        return_value=httpx.Response(200, json=runs)
-    )
-
-    partial = json.loads(await module.read_all_agent_outputs())
-    assert partial["agent_count"] == 2
-    assert partial["pipeline_status"] == "has_partial"
-
-    route.mock(
-        return_value=httpx.Response(
-            200, json=runs + [_run("modeling_agent", 3, "failed")]
-        )
-    )
-    failed = json.loads(await module.read_all_agent_outputs())
-    assert failed["agent_count"] == 3
-    assert failed["pipeline_status"] == "has_failures"
-
-
-@pytest.mark.contract
-@pytest.mark.asyncio
-async def test_two_steps_sharing_an_agent_type_keep_separate_outputs(api):
-    """The second step must not overwrite the first one's result."""
-    first = _run("segmentation_agent", 1, "completed")
-    second = _run("segmentation_agent", 3, "partial")
-    api.get(f"{API}/runs/session/{SESSION_ID}").mock(
-        return_value=httpx.Response(200, json=[first, second])
-    )
-
-    result = json.loads(await module.read_all_agent_outputs())
-
-    assert result["agent_count"] == 2
-    assert set(result["agents"]) == {"segmentation_agent", "segmentation_agent#3"}
-
-
-@pytest.mark.contract
-@pytest.mark.asyncio
-async def test_a_step_with_no_output_yet_is_not_reported_as_one(api):
-    pending = _run("modeling_agent", 2)
-    pending["scratchpad_summary"] = None
-    api.get(f"{API}/runs/session/{SESSION_ID}").mock(
-        return_value=httpx.Response(200, json=[pending])
-    )
-
-    result = json.loads(await module.read_all_agent_outputs())
-
-    assert result == {"agent_count": 0, "agents": {}, "pipeline_status": "no_outputs"}
 
 
 @pytest.mark.contract

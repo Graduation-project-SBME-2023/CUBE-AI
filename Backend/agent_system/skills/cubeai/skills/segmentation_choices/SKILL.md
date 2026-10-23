@@ -1,13 +1,13 @@
 ---
 name: segmentation_choices
 description: Locking the region of interest and briefing the segmentation step - ROI identity, target labels, mask reuse and review.
-applies_to: [main, composer]
 ---
 # Segmentation choices
 
-The segmentation step segments the approved cohort: it reuses existing masks
+The segmentation step segments the frozen cohort: it reuses existing masks
 that are clinically equivalent to the target, generates the rest with a
-text-prompted model (VoxTell), and waits for the radiologist's review. The
+text-prompted model (VoxTell), and, when the user asked for a review, waits
+for the radiologist's. The
 clinical decisions inside it follow the same policy as below, so the region
 of interest you lock here is the one it segments. `list_models` shows the
 models available; `check_having_mask` shows whether a volume already has one.
@@ -24,9 +24,10 @@ models available; `check_having_mask` shows whether a volume already has one.
 - Do not add a target the study did not ask for: a healthy-versus-diseased
   organ study segments the organ, not its lesions.
 
-The radiologist reviews every mask before any later step uses it; the node
-waits for that review, holding no resources. When the user asks why the study
-is not moving, a pending review is often the reason.
+When the user asked to review the masks, the radiologist reviews every mask
+before any later step uses it, and the node waits for that review, holding
+no resources; otherwise the masks are accepted automatically. When the user
+asks why the study is not moving, a pending review is often the reason.
 
 ## The region of interest identity policy
 

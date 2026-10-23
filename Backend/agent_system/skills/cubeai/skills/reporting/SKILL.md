@@ -1,7 +1,6 @@
 ---
 name: reporting
 description: Judging the hypothesis from the results and producing the manuscript - decisions, caveats, templates and citations.
-applies_to: [main, composer]
 ---
 # Reporting a study
 

@@ -12,7 +12,6 @@ from pydantic import ValidationError
 from agent_system.toolkit.agents.engine import AgentResult, AgentStatus
 from agent_system.toolkit.artifacts.builtin import COHORT
 from agent_system.toolkit.catalog import build
-from agent_system.toolkit.manifest import Gate
 from tests.support.toolkit_fixtures import TEST_SESSION_ID, make_context
 
 pytestmark = pytest.mark.unit
@@ -43,8 +42,9 @@ def test_the_spec(spec):
     assert spec.kind == "execution"
     assert spec.inputs == {}  # it starts from the hypothesis, not from another node
     assert spec.outputs["cohort"].artifact_type == "Cohort"
-    assert spec.gates == frozenset({Gate.COHORT_APPROVAL})
-    assert spec.human_in_the_loop is True
+    assert not hasattr(spec, "gates")  # the approval happens only when the user asked (D28)
+    assert "ask_user" not in spec.allowed_tools  # implicit, never listed
+    assert spec.skills == ("cohort_building",)
     assert (spec.max_tool_iterations, spec.max_completion_retries) == (20, 2)
 
 
@@ -125,7 +125,7 @@ def _check(spec, fake_domain_api, cohort=None, rows=2, run=None, output=OUTPUT):
     return asyncio.run(spec.completion_check(make_context(run_id=RUN_ID), parsed))
 
 
-def test_complete_once_the_approved_cohort_is_handed_off(spec, fake_domain_api):
+def test_complete_once_the_frozen_cohort_is_handed_off(spec, fake_domain_api):
     assert _check(spec, fake_domain_api) == []
 
 
@@ -137,7 +137,7 @@ def test_complete_once_the_approved_cohort_is_handed_off(spec, fake_domain_api):
         (_cohort(cohort_id="c0c0c0c0-0000-4000-8000-0000000000c9"), 2, None, ["not " + COHORT_ID]),
         (_cohort(selection_summary={}), 2, None, ["validate_population_anatomy"]),
         (_cohort(members=[]), 2, None, ["the cohort is empty"]),
-        (_cohort(frozen_at=None), 2, None, ["has not approved the cohort"]),
+        (_cohort(frozen_at=None), 2, None, ["the cohort is not frozen"]),
         (None, 0, None, ["no labelled volume"]),
         (None, 3, None, ["has 3 labelled volumes, not 2"]),
         (None, 2, _run(summary=None), ["scratchpad_write_summary"]),
