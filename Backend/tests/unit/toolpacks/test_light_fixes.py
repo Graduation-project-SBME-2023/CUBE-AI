@@ -148,6 +148,41 @@ def test_one_failed_llm_call_keeps_the_other_labels(monkeypatch):
     assert closed == [True]  # the LLM client is closed after the batch
 
 
+@pytest.mark.parametrize("mode", ["manual", "upload"])
+def test_no_label_is_extracted_outside_automatic_mode(monkeypatch, mode):
+    """The doctor labels the cohort in any other mode; the tool refuses rather
+    than relying on every caller to leave it out of an allowlist (Plan 3)."""
+    written = []
+
+    async def fake_cohort():
+        return {"cohort_id": "c1", "criteria": {"labelling_mode": mode},
+                "members": [{"volume_series_instance_uid": "v1", "subject_key": "p1"}]}
+
+    async def fake_write(cohort_id, labels):
+        written.append(labels)
+
+    monkeypatch.setattr(cohort_labels.domain_api, "require_population_cohort", fake_cohort)
+    monkeypatch.setattr(cohort_labels.domain_api, "write_cohort_labels", fake_write)
+
+    result = call_tool(cohort_labels.extract_cohort_labels, {}, _ctx())
+
+    assert result["error_code"] == "manual_labelling"
+    assert result["cohort_id"] == "c1"
+    assert mode in result["error_message"]
+    assert written == []
+
+
+def test_automatic_is_the_default_mode(monkeypatch):
+    async def fake_cohort():
+        return {"cohort_id": "c1", "criteria": {}, "members": []}
+
+    monkeypatch.setattr(cohort_labels.domain_api, "require_population_cohort", fake_cohort)
+
+    result = call_tool(cohort_labels.extract_cohort_labels, {}, _ctx())
+
+    assert result["status"] == "success" and result["extracted_count"] == 0
+
+
 # --- L7 + S12: generate_targets
 
 

@@ -207,8 +207,10 @@ def test_artifact_type_problems_are_included():
         ("main_agent", {"inputs": {"cohort": PortSpec("Cohort")}}, "only execution agents have ports, not control agents"),
         ("mask_resolution_agent", {"outputs": {"m": PortSpec("MaskSet")}}, "only execution agents have ports, not internal agents"),
         ("composer", {"parent": "main_agent"}, "only internal agents have a parent, not control agents"),
-        ("segmentation_agent", {"delegates": ["mask_agent"]}, "unknown delegate 'mask_agent'"),
-        ("segmentation_agent", {"delegates": ["composer"]}, "delegate 'composer' is not an internal agent"),
+        ("segmentation_agent", {"delegates": ["mask_resolution_agent", "mask_agent"]}, "unknown delegate 'mask_agent'"),
+        ("segmentation_agent", {"delegates": ["mask_resolution_agent", "composer"]}, "delegate 'composer' is not an internal agent"),
+        ("main_agent", {"gates": ["cohort_approval"]}, "only execution agents have gates, not control agents"),
+        ("mask_resolution_agent", {"gates": ["segmentation_review"]}, "only execution agents have gates, not internal agents"),
     ],
 )  # fmt: skip
 def test_agent_rules(agent, changes, problem):
@@ -264,6 +266,105 @@ def test_delegation_cycles():
         "agent 'segmentation_agent': is in a delegation cycle",
         "agent 'mask_resolution_agent': delegate 'segmentation_agent' is not an internal agent",
         "agent 'mask_resolution_agent': is in a delegation cycle",
+    ]
+
+
+def test_an_internal_agent_nobody_lists_is_refused():
+    agents = _replace(AGENTS, "segmentation_agent", delegates=[])
+
+    assert _catalog(agents=agents).problems() == [
+        "agent 'mask_resolution_agent': parent 'segmentation_agent' lists it in neither "
+        "its delegates nor its workflow"
+    ]
+
+
+def test_an_execution_agent_output_needs_an_extract():
+    agents = _replace(AGENTS, "segmentation_agent", outputs={"masks": PortSpec("MaskSet")})
+
+    assert _catalog(agents=agents).problems() == [
+        "agent 'segmentation_agent': output port 'masks' needs an extract function"
+    ]
+
+
+def test_execution_agents_may_declare_gates():
+    agents = _replace(AGENTS, "segmentation_agent", gates=["segmentation_review"])
+    catalog = _catalog(agents=agents)
+
+    assert catalog.problems() == []
+    described = catalog.describe("segmentation_agent")
+    assert (described["gates"], described["human_in_the_loop"]) == (["segmentation_review"], True)
+    json.dumps(described)
+
+
+# --- validate: workflow agents
+
+
+def _build_graph(ctx: Any) -> object:
+    return object()
+
+
+LITERATURE = _agent(
+    "literature_review_agent",
+    "execution",
+    workflow=["pico_analyst", "search_executor"],
+    build_graph=_build_graph,
+    outputs={"literature": PortSpec("LiteratureContext", extract=_masks)},
+)
+PICO = _agent("pico_analyst", "internal", parent="literature_review_agent")
+SEARCH = _agent(
+    "search_executor", "internal", parent="literature_review_agent", allowed_tools=["get_patient"]
+)
+WORKFLOW_AGENTS = [*AGENTS, LITERATURE, PICO, SEARCH]
+
+
+def test_a_valid_workflow_agent():
+    assert _catalog(agents=WORKFLOW_AGENTS).problems() == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "problems"),
+    [
+        (
+            {"workflow": ["pico_analyst", "search_executor", "ranker"]},
+            ["agent 'literature_review_agent': unknown workflow step 'ranker'"],
+        ),
+        (
+            {"workflow": ["pico_analyst", "search_executor", "segmentation_agent"]},
+            ["agent 'literature_review_agent': workflow step 'segmentation_agent' is not an internal agent"],
+        ),
+        (
+            {"workflow": ["pico_analyst", "search_executor", "mask_resolution_agent"]},
+            [
+                "agent 'literature_review_agent': workflow step 'mask_resolution_agent' has parent "
+                "'segmentation_agent', not 'literature_review_agent'"
+            ],
+        ),
+        (
+            {"allowed_tools": ["run_agent"]},
+            ["agent 'literature_review_agent': a workflow agent starts its steps itself and may not use 'run_agent'"],
+        ),
+    ],
+)  # fmt: skip
+def test_workflow_rules(changes, problems):
+    agents = _replace(WORKFLOW_AGENTS, "literature_review_agent", **changes)
+
+    assert _catalog(agents=agents).problems() == problems
+
+
+def test_only_execution_agents_have_a_workflow():
+    critic = _agent(
+        "graph_critic", "internal", parent="mask_resolution_agent",
+        workflow=["pico_analyst"], build_graph=_build_graph,
+    )  # fmt: skip
+    agents = [
+        *_replace(WORKFLOW_AGENTS, "mask_resolution_agent", delegates=["graph_critic"]),
+        critic,
+    ]
+
+    assert _catalog(agents=agents).problems() == [
+        "agent 'graph_critic': only execution agents have a workflow, not internal agents",
+        "agent 'graph_critic': workflow step 'pico_analyst' has parent "
+        "'literature_review_agent', not 'graph_critic'",
     ]
 
 
@@ -384,6 +485,10 @@ def test_describe_an_agent():
     assert segmentation["delegates"] == ["mask_resolution_agent"]
     assert segmentation["resources"] == ["llm"]
     assert segmentation["output_schema"] is None
+    assert segmentation["gates"] == []
+    assert segmentation["human_in_the_loop"] is False
+    assert segmentation["workflow"] == []
+    assert segmentation["max_context_tokens"] is None
     assert composer["tools"] == "dynamic"
     assert composer["output_schema"]["title"] == "_Proposal"
     json.dumps(segmentation)
@@ -500,16 +605,33 @@ def test_agent_files_go_through_the_loader(pack_root):
     name, write = pack_root
     first = write("agentpacks/research/seg_agent/agent.md", "---\nagent_type: seg_agent\n---\n")
     second = write("agentpacks/core/main_agent/agent.md", "---\nagent_type: main_agent\n---\n")
-    loaded: list[Path] = []
+    loaded: dict[Path, str] = {}
 
-    def load(path: Path) -> AgentSpec:
-        loaded.append(path)
+    def load(path: Path, package: str) -> AgentSpec:
+        loaded[path] = package
         return _agent(path.parent.name, "execution")
 
     catalog = build(packages=[f"{name}.agentpacks"], entry_point_groups=(), load_agent_file=load)
 
-    assert sorted(loaded) == sorted([first, second])
+    # Each file comes with its directory's package name, under the pack's own root.
+    assert loaded == {
+        first: f"{name}.agentpacks.research.seg_agent",
+        second: f"{name}.agentpacks.core.main_agent",
+    }
     assert catalog.agents.names() == {"seg_agent", "main_agent"}
+
+
+def test_every_broken_agent_file_is_reported_at_once(pack_root):
+    name, write = pack_root
+    write("agentpacks/research/seg_agent/agent.md", "no front matter\n")
+    write("agentpacks/research/feature_agent/agent.md", "---\nagent_type: other\n---\n")
+
+    with pytest.raises(CatalogError) as caught:
+        build(packages=[f"{name}.agentpacks"], entry_point_groups=())
+
+    problems = caught.value.problems
+    assert len(problems) == 2
+    assert "feature_agent" in problems[0] and "seg_agent" in problems[1]
 
 
 def test_agent_files_without_a_loader_are_an_error(pack_root):
@@ -517,7 +639,7 @@ def test_agent_files_without_a_loader_are_an_error(pack_root):
     write("agentpacks/research/seg_agent/agent.md", "---\n---\n")
 
     with pytest.raises(CatalogError, match=r"found 1 agent\.md file\(s\) but no agent loader"):
-        build(packages=[f"{name}.agentpacks"], entry_point_groups=())
+        build(packages=[f"{name}.agentpacks"], entry_point_groups=(), load_agent_file=None)
 
 
 def test_entry_point_packs(pack_root, monkeypatch):

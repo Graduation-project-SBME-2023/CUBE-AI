@@ -23,7 +23,14 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from ..manifest import TOOL_NAME_PATTERN, Resource, coerce_enum, coerce_enum_set
+from ..manifest import (
+    IMPLICIT_GATES,
+    TOOL_NAME_PATTERN,
+    Gate,
+    Resource,
+    coerce_enum,
+    coerce_enum_set,
+)
 from ..ports import PortSpec, freeze_ports
 
 if TYPE_CHECKING:
@@ -52,15 +59,29 @@ type SystemPromptFn = Callable[[ToolContext], str]
 type AllowedToolsFn = Callable[[ToolContext, Sequence[ToolSpec]], Iterable[str]]
 # Returns what is still missing before the agent may finish; empty = complete.
 # The engine feeds the issues back and retries up to max_completion_retries times.
-type CompletionCheck = Callable[[ToolContext], Awaitable[Sequence[str]]]
+# The second argument is the agent's final output, already parsed against its
+# output_contract (None when it has none), so the check can hold the ids the
+# model reports against the recorded rows instead of trusting them.
+type CompletionCheck = Callable[[ToolContext, Any], Awaitable[Sequence[str]]]
 # Builds the agent's first message from its task and its node inputs, keyed by port.
 type ContextBuilder = Callable[[str, Mapping[str, Any], ToolContext], str]
+# Returns the uncompiled LangGraph StateGraph of a workflow agent (Phase 9.6).
+# The toolkit never imports LangGraph, so the graph is typed as Any here.
+type BuildGraph = Callable[[ToolContext], Any]
 
 
 def _check_agent_name(value: Any, what: str) -> str:
     if not isinstance(value, str) or not AGENT_TYPE_PATTERN.match(value):
         raise ValueError(f"{what} {value!r} must match {AGENT_TYPE_PATTERN.pattern}")
     return value
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _names(values: Any, what: str, pattern: re.Pattern[str]) -> tuple[str, ...]:
@@ -120,12 +141,27 @@ class AgentSpec:
 
     # --- UI and ownership
     ui: str | None = None  # view type for the node, e.g. "segmentation_view"
-    human_in_the_loop: bool = False  # user gates inside the node (cohort approval, review)
     parent: str | None = None  # the owner of an internal agent
 
     # --- checkpoints (D27): a resumable node's retry continues the run's thread.
     # None takes the kind's default: true for execution agents, false otherwise.
     resumable: bool | None = None
+
+    # --- user gates (D27): what the agent's tools may suspend the node for.
+    # tool_approval is implicit and never declared. gate_timeout_s bounds how
+    # long a suspended gate may wait (None = no limit); it is separate from
+    # timeout_s, which counts running time only.
+    gates: frozenset[Gate] = frozenset()
+    gate_timeout_s: float | None = None
+
+    # --- context budget: above it the engine compacts older messages
+    # (Phase 9.4). None accepts the engine's default.
+    max_context_tokens: int | None = None
+
+    # --- fixed workflow (Phase 9.6): internal agents run as the steps of the
+    # graph build_graph returns, in this order. Such an agent has no delegates.
+    workflow: tuple[str, ...] = ()
+    build_graph: BuildGraph | None = None
 
     def __post_init__(self) -> None:
         # Frozen dataclass: normalised values go through object.__setattr__.
@@ -182,8 +218,6 @@ class AgentSpec:
 
         if self.ui is not None and (not isinstance(self.ui, str) or not self.ui.strip()):
             raise ValueError(f"agent {name!r}: ui must be a non-empty string or None")
-        if not isinstance(self.human_in_the_loop, bool):
-            raise TypeError(f"agent {name!r}: human_in_the_loop must be a bool")
         if self.resumable is None:
             _set("resumable", self.kind is AgentKind.EXECUTION)
         elif not isinstance(self.resumable, bool):
@@ -191,12 +225,42 @@ class AgentSpec:
         if self.parent is not None:
             _check_agent_name(self.parent, f"agent {name!r}: parent")
 
+        _set("gates", coerce_enum_set(Gate, self.gates, "gates"))
+        if implicit := sorted(gate.value for gate in self.gates & IMPLICIT_GATES):
+            raise ValueError(f"agent {name!r}: {implicit} are implicit gates; do not declare them")
+        if self.gate_timeout_s is not None:
+            if not _is_number(self.gate_timeout_s) or not self.gate_timeout_s > 0:
+                raise ValueError(f"agent {name!r}: gate_timeout_s must be > 0 or None")
+            if not self.gates:
+                raise ValueError(f"agent {name!r}: gate_timeout_s needs at least one gate")
+
+        if self.max_context_tokens is not None and (
+            not _is_int(self.max_context_tokens) or self.max_context_tokens < 1
+        ):
+            raise ValueError(f"agent {name!r}: max_context_tokens must be an int >= 1 or None")
+
+        _set("workflow", _names(self.workflow, f"agent {name!r}: workflow", AGENT_TYPE_PATTERN))
+        if name in self.workflow:
+            raise ValueError(f"agent {name!r}: workflow lists the agent itself")
+        if self.workflow and self.delegates:
+            # The workflow graph starts the steps; run_agent never does.
+            raise ValueError(f"agent {name!r}: has a workflow and delegates; use one or the other")
+        if self.build_graph is not None and not callable(self.build_graph):
+            raise TypeError(f"agent {name!r}: build_graph must be callable")
+        if bool(self.workflow) != (self.build_graph is not None):
+            raise ValueError(f"agent {name!r}: workflow and build_graph go together")
+
     # --- derived fields
 
     @property
     def name(self) -> str:
         """The agent's name in the catalog, shared with tools: its ``agent_type``."""
         return self.agent_type
+
+    @property
+    def human_in_the_loop(self) -> bool:
+        """True when the node may suspend on a user gate; derived from ``gates``."""
+        return bool(self.gates)
 
     @property
     def is_graph_node(self) -> bool:

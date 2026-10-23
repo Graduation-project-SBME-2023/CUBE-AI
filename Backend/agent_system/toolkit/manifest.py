@@ -70,6 +70,23 @@ class Visibility(StrEnum):
     HARNESS = "harness"  # harness code only (e.g. the Node Runner's bookkeeping)
 
 
+class Gate(StrEnum):
+    """A user decision an agent node suspends on until the user answers (D27).
+
+    An execution agent declares the gates its tools may raise; the engine
+    suspends the attempt on ``ctx.user_gate()`` (Phase 9.3) and resumes it
+    with the decision.
+    """
+
+    COHORT_APPROVAL = "cohort_approval"  # the population tools (Phase 9.7)
+    SEGMENTATION_REVIEW = "segmentation_review"  # run_segmentation_with_guard (Phase 9.7)
+    TOOL_APPROVAL = "tool_approval"  # a guarded tool call inside a node (Phase 11.3)
+
+
+# Any agent node may raise these without declaring them, so an agent never lists them.
+IMPLICIT_GATES: frozenset[Gate] = frozenset({Gate.TOOL_APPROVAL})
+
+
 PHI_SCOPES: frozenset[DataScope] = frozenset({DataScope.PHI_READ, DataScope.PHI_WRITE})
 WRITE_SCOPES: frozenset[DataScope] = frozenset(
     {DataScope.PHI_WRITE, DataScope.DB_WRITE, DataScope.FS_WRITE}

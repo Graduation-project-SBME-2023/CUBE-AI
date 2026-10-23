@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from agent_system.toolkit.agents.spec import AgentKind, AgentSpec
 from agent_system.toolkit.ports import ExtractedArtifact, PortSpec
-from agent_system.toolkit.manifest import Resource
+from agent_system.toolkit.manifest import Gate, Resource
 from agent_system.toolkit.tools.spec import ToolSpec
 
 pytestmark = pytest.mark.unit
@@ -32,7 +32,7 @@ def _masks(result: Any) -> ExtractedArtifact:
     return ExtractedArtifact(ref={"segmentation_batch_id": result["run"]})
 
 
-async def _handoff_issues(ctx: Any) -> list[str]:
+async def _handoff_issues(ctx: Any, output: Any) -> list[str]:
     return []
 
 
@@ -89,6 +89,11 @@ def test_defaults_and_normalisation():
     assert spec.max_completion_retries == 0
     assert spec.human_in_the_loop is False
     assert spec.parent is None
+    assert spec.gates == frozenset()
+    assert spec.gate_timeout_s is None
+    assert spec.max_context_tokens is None
+    assert spec.workflow == ()
+    assert spec.build_graph is None
 
 
 @pytest.mark.parametrize(
@@ -115,7 +120,7 @@ def test_spec_is_immutable_and_copy_replace_revalidates():
     with pytest.raises(TypeError):
         spec.inputs["masks"] = PortSpec("MaskSet")  # type: ignore[index]
 
-    changed = copy.replace(spec, timeout_s=10800, human_in_the_loop=True)
+    changed = copy.replace(spec, timeout_s=10800, gates=["segmentation_review"])
     assert (changed.timeout_s, changed.human_in_the_loop) == (10800, True)
     with pytest.raises(ValueError, match="kind="):
         copy.replace(spec, kind="planner")
@@ -136,12 +141,14 @@ def test_a_population_style_agent():
         delegates=[],
         completion_check=_handoff_issues,
         max_completion_retries=2,
-        human_in_the_loop=True,
+        gates=["cohort_approval"],
         ui="population_view",
     )
 
     assert spec.completion_check is _handoff_issues
     assert spec.max_completion_retries == 2
+    assert spec.gates == frozenset({Gate.COHORT_APPROVAL})
+    assert spec.human_in_the_loop is True
 
 
 def test_an_internal_agent():
@@ -264,14 +271,83 @@ def test_allowlist_function_result_is_checked():
         ({"output_contract": _Proposal(summary="x")}, TypeError, "output_contract"),
         ({"context_builder": "build"}, TypeError, "context_builder"),
         ({"ui": ""}, ValueError, "ui"),
-        ({"human_in_the_loop": "yes"}, TypeError, "human_in_the_loop"),
         ({"resumable": "yes"}, TypeError, "resumable"),
         ({"parent": "Segmentation"}, ValueError, "parent"),
+        ({"gates": ["manual_review"]}, ValueError, "gates='manual_review'"),
+        ({"gates": "cohort_approval"}, TypeError, "not a string"),
+        ({"gates": ["tool_approval"]}, ValueError, "implicit gates"),
+        ({"gate_timeout_s": 600}, ValueError, "needs at least one gate"),
+        ({"gates": ["segmentation_review"], "gate_timeout_s": 0}, ValueError, "gate_timeout_s"),
+        ({"gates": ["segmentation_review"], "gate_timeout_s": True}, ValueError, "gate_timeout_s"),
+        ({"max_context_tokens": 0}, ValueError, "max_context_tokens"),
+        ({"max_context_tokens": 60000.0}, ValueError, "max_context_tokens"),
+        ({"max_context_tokens": True}, ValueError, "max_context_tokens"),
+        ({"workflow": "pico_analyst"}, TypeError, "not a string"),
+        ({"workflow": ["PicoAnalyst"]}, ValueError, "workflow entry"),
+        ({"workflow": ["segmentation_agent"], "delegates": []}, ValueError, "agent itself"),
+        ({"build_graph": "graph"}, TypeError, "build_graph must be callable"),
     ],
 )
 def test_malformed_fields_are_refused(overrides, error, match):
     with pytest.raises(error, match=match):
         _agent(**overrides)
+
+
+# --- gates, context budget, workflow
+
+
+def test_human_in_the_loop_is_derived_from_the_gates():
+    spec = _agent(gates=["segmentation_review"], gate_timeout_s=86400)
+
+    assert spec.gates == frozenset({Gate.SEGMENTATION_REVIEW})
+    assert spec.gate_timeout_s == 86400
+    assert spec.human_in_the_loop is True
+    assert _agent().human_in_the_loop is False
+    with pytest.raises(TypeError):
+        _agent(human_in_the_loop=True)  # no longer a field: declare the gates instead
+
+
+def test_max_context_tokens():
+    assert _agent(max_context_tokens=60000).max_context_tokens == 60000
+
+
+def _build_graph(ctx: Any) -> object:
+    return object()
+
+
+def _literature(**overrides: Any) -> AgentSpec:
+    fields: dict[str, Any] = {
+        "agent_type": "literature_review_agent",
+        "delegates": [],
+        "allowed_tools": [],
+        "inputs": {},
+        "outputs": {},
+        "workflow": ["pico_analyst", "query_builder", "search_executor"],
+        "build_graph": _build_graph,
+    }
+    fields.update(overrides)
+    return _agent(**fields)
+
+
+def test_a_workflow_agent_keeps_its_steps_in_order():
+    spec = _literature()
+
+    assert spec.workflow == ("pico_analyst", "query_builder", "search_executor")
+    assert spec.build_graph is _build_graph
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"delegates": ["clinical_target_intent_agent"]}, "use one or the other"),
+        ({"build_graph": None}, "workflow and build_graph go together"),
+        ({"workflow": []}, "workflow and build_graph go together"),
+        ({"workflow": ["pico_analyst", "pico_analyst"]}, "more than once"),
+    ],
+)
+def test_workflow_rules(overrides, match):
+    with pytest.raises(ValueError, match=match):
+        _literature(**overrides)
 
 
 def test_required_fields():

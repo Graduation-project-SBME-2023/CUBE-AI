@@ -27,6 +27,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from .agents.loader import AgentFileError, load_agent_file as _load_agent_file
 from .agents.registry import AgentRegistry
 from .agents.spec import AgentKind, AgentSpec
 from .artifacts.base import ArtifactType, ArtifactTypeRegistry
@@ -52,11 +53,13 @@ ENTRY_POINT_GROUPS: tuple[str, ...] = ("cubeai.toolpacks", "cubeai.agentpacks")
 AGENT_FILE = "agent.md"
 
 MAIN_AGENT = "main_agent"
-CONTROL_FORBIDDEN_TOOLS = frozenset({"run_agent", "plan", "recover"})
+RUN_AGENT = "run_agent"
+CONTROL_FORBIDDEN_TOOLS = frozenset({RUN_AGENT, "plan", "recover"})
 MAIN_AGENT_EXCEPTIONS = frozenset({"plan", "recover"})
 
 type Spec = ToolSpec | AgentSpec
-type AgentFileLoader = Callable[[Path], AgentSpec]
+# (agent.md path, dotted name of its directory as a package) -> spec; see agents/loader.py.
+type AgentFileLoader = Callable[[Path, str], AgentSpec]
 # Plan 4's sandbox policy: returns what is wrong with a tool, empty when nothing is.
 type PolicyHook = Callable[[ToolSpec], Iterable[str]]
 
@@ -134,9 +137,21 @@ class Catalog:
                 allowed = MAIN_AGENT_EXCEPTIONS if agent.name == MAIN_AGENT else frozenset()
                 for name in sorted(set(agent.allowed_tools) & (CONTROL_FORBIDDEN_TOOLS - allowed)):
                     yield f"a control agent may not use {name!r}"
+            if agent.workflow and RUN_AGENT in agent.allowed_tools:
+                yield f"a workflow agent starts its steps itself and may not use {RUN_AGENT!r}"
 
-        if not agent.is_graph_node and (agent.inputs or agent.outputs):
-            yield f"only execution agents have ports, not {agent.kind} agents"
+        if agent.is_graph_node:
+            for port_name, port in agent.outputs.items():
+                if port.extract is None:  # the Node Runner could not record the artifact
+                    yield f"output port {port_name!r} needs an extract function"
+        else:
+            if agent.inputs or agent.outputs:
+                yield f"only execution agents have ports, not {agent.kind} agents"
+            # Only a node can suspend: an attempt is what a gate parks (T10).
+            if agent.gates:
+                yield f"only execution agents have gates, not {agent.kind} agents"
+            if agent.workflow:
+                yield f"only execution agents have a workflow, not {agent.kind} agents"
 
         internal = agent.kind is AgentKind.INTERNAL
         if internal and agent.parent is None:
@@ -146,11 +161,29 @@ class Catalog:
         if agent.parent is not None:
             if agent.parent not in self.agents:
                 yield f"unknown parent {agent.parent!r}"
-            elif internal and self.agents.get(agent.parent).kind is AgentKind.CONTROL:
-                yield (
-                    f"parent {agent.parent!r} is a control agent; "
-                    "only execution and internal agents start internal agents"
-                )
+            elif internal:
+                owner = self.agents.get(agent.parent)
+                if owner.kind is AgentKind.CONTROL:
+                    yield (
+                        f"parent {agent.parent!r} is a control agent; "
+                        "only execution and internal agents start internal agents"
+                    )
+                elif agent.name not in (*owner.delegates, *owner.workflow):
+                    # Nothing could ever start it: a forgotten entry, not a spare agent.
+                    yield (
+                        f"parent {agent.parent!r} lists it in neither its delegates "
+                        "nor its workflow"
+                    )
+
+        for name in agent.workflow:
+            if name not in self.agents:
+                yield f"unknown workflow step {name!r}"
+                continue
+            step = self.agents.get(name)
+            if step.kind is not AgentKind.INTERNAL:
+                yield f"workflow step {name!r} is not an internal agent"
+            elif step.parent != agent.name:
+                yield f"workflow step {name!r} has parent {step.parent!r}, not {agent.name!r}"
 
         # Control agents never get run_agent, so their delegates could never run.
         if agent.kind is AgentKind.CONTROL and agent.delegates:
@@ -237,6 +270,7 @@ TOOL_MANIFEST = (
 AGENT_MANIFEST = (
     "model_profile", "delegates", "max_tool_iterations", "timeout_s",
     "resources", "max_completion_retries", "human_in_the_loop", "resumable", "parent",
+    "gates", "gate_timeout_s", "max_context_tokens", "workflow",
 )  # fmt: skip
 
 
@@ -294,13 +328,14 @@ def build(
     *,
     packages: Iterable[str] = PACK_PACKAGES,
     entry_point_groups: Iterable[str] = ENTRY_POINT_GROUPS,
-    load_agent_file: AgentFileLoader | None = None,
+    load_agent_file: AgentFileLoader | None = _load_agent_file,
     policy_hooks: Iterable[PolicyHook] = (),
 ) -> Catalog:
     """Discover every pack and return the catalog. Call ``validate()`` next.
 
-    Raises ``CatalogError`` when two different specs claim one name, or when
-    ``agent.md`` files exist but no loader was given.
+    Raises ``CatalogError`` when two different specs claim one name, when an
+    ``agent.md`` file cannot be loaded (every such file is listed), or when
+    ``agent.md`` files exist and ``load_agent_file=None``.
     """
     roots = _pack_roots(packages, entry_point_groups)
     tools: list[ToolSpec] = []
@@ -316,12 +351,15 @@ def build(
                 artifact_types.append(value)
 
     problems: list[str] = []
-    agent_files = sorted({path for root in roots for path in _agent_files(root)})
+    agent_files = dict(sorted(item for root in roots for item in _agent_files(root)))
     if agent_files:
         if load_agent_file is None:
             problems.append(f"found {len(agent_files)} {AGENT_FILE} file(s) but no agent loader")
-        else:
-            agents.extend(load_agent_file(path) for path in agent_files)
+        for path, package in agent_files.items() if load_agent_file else ():
+            try:
+                agents.append(load_agent_file(path, package))
+            except AgentFileError as exc:  # report every broken file, not only the first
+                problems.append(str(exc))
 
     catalog = Catalog(policy_hooks=tuple(policy_hooks))
     for registry, items in (
@@ -366,9 +404,13 @@ def _reraise(_name: str) -> None:
     raise  # pkgutil calls this while handling the ImportError; surface it
 
 
-def _agent_files(root: ModuleType) -> Iterator[Path]:
+def _agent_files(root: ModuleType) -> Iterator[tuple[Path, str]]:
+    """Each ``agent.md`` below ``root``, with its directory's dotted package
+    name under the root's own import name (so hooks load under that root)."""
     for directory in getattr(root, "__path__", ()):
-        yield from Path(directory).rglob(AGENT_FILE)
+        for path in Path(directory).rglob(AGENT_FILE):
+            parts = path.parent.relative_to(directory).parts
+            yield path, ".".join((root.__name__, *parts))
 
 
 def _register_all(registry: Registry[Any], items: Iterable[Any]) -> list[str]:

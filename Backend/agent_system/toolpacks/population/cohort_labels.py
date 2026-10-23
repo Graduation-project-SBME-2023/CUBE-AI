@@ -14,7 +14,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common import domain_api, llm, settings
 from ..common.emit import emit_view
 from ..common.workspace import get_workspace
@@ -31,6 +31,7 @@ from .label_adjudicator import adjudicate_member, criteria_prompt, normalized_la
 logger = logging.getLogger(__name__)
 
 MAX_EVIDENCE_CHARS = 20_000
+AUTOMATIC_LABELLING = "automatic"
 
 
 async def _member_identifiers(member: dict[str, Any], limit: asyncio.Semaphore) -> set[str]:
@@ -146,6 +147,17 @@ async def extract_cohort_labels() -> dict[str, Any]:
         return domain_api.error_result_from(exc)
 
     cohort_id = cohort["cohort_id"]
+    # The Population UI sets the mode before the step starts; "automatic" is
+    # what it shows until the doctor chooses. In any other mode the doctor
+    # labels the cohort, and no LLM may write a label over that choice.
+    labelling_mode = (cohort.get("criteria") or {}).get("labelling_mode", AUTOMATIC_LABELLING)
+    if labelling_mode != AUTOMATIC_LABELLING:
+        return error_result(
+            "manual_labelling",
+            f"The cohort is in {labelling_mode!r} labelling mode: the doctor labels the volumes, "
+            "so no label was extracted. Skip this step and continue with generate_targets.",
+            cohort_id=cohort_id,
+        )
     members = cohort.get("members") or []
     if not members:
         return {
