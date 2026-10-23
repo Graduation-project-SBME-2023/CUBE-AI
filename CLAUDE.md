@@ -29,7 +29,12 @@ Parts of it are stale — see **Gotchas**.
   (`@xyflow/react`), Recharts, Cornerstone3D.
 - **Data:** PostgreSQL 18 (`workflow_db`), Orthanc (DICOM + DICOMweb).
 - **LLM:** Ollama by default (`OLLAMA_MODEL`, default `gpt-oss:120b-cloud`); OpenAI /
-  Azure OpenAI also supported via `Backend/agent_system/client_config.py`.
+  Azure OpenAI also supported via `Backend/agent_system/client_config.py`. The Plan 9 agent
+  engine (Claude Agent SDK, `claude-agent-sdk` pinned exactly) reaches every model through
+  the `litellm` compose service: aliases in `deploy/litellm/config.yaml`, aliases and model
+  profiles in `Backend/agent_system/config/models.yaml`, read by `harness/model_gateway.py`.
+  Provider keys go in `deploy/litellm.env` (git-ignored), never in `deploy/.env`, which the
+  agents container reads whole.
 - **Deploy:** Docker Compose (`deploy/`), OpenResty ingress, PowerShell/bash launchers in `scripts/`.
 
 ## Commands

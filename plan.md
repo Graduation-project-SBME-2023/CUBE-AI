@@ -176,7 +176,7 @@ deploy/
 | 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | ✅ Done (6.1–6.6; 6.6 migration "t" on 2026-10-22) |
 | 7 | Modeling Engine, Heavy Tools as Jobs + `run_modeling` | M2 | 0, 2, 5, 6 | 🟡 7.0–7.2 done (engine, rename, legacy records); jobs wait for Plan 5 |
 | 8 | Validator and Diff Engine | M3 | 1, 6 | ✅ 8.1–8.4 done (`ce5a777e`, `3ac5411c`); the 2026-10-19 follow-up (`seed_from`, `approval`) not started |
-| 9 | Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM) | M3 | 1, 3, 6 (6.6 for 9.5), 15.4 (for 9.7) | Not started |
+| 9 | Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM) | M3 | 1, 3, 6 (6.6 for 9.5), 15.4 (for 9.7) | 🟡 9.0 done on gpt-oss (Claude checks open); 9.1–9.3 built 2026-10-23; 9.4–9.7 not started |
 | 10 | Executor, Node Runner, Watchdog | M3 | 5, 6, 8, 9 | Not started |
 | 11 | Runtime Guardrails, Modes, Approvals | M3 | 5, 6, 8, 10 | Not started |
 | 12 | Session Layer: Inbox, Main Loop, Context, Skills, Planner | M3 | 8, 9, 10, 11 | Not started |
@@ -1014,6 +1014,13 @@ Also checked: the Stop hook's `{"decision": "block", "reason": …}` makes the a
 - **One CLI subprocess per running SDK session.** The `llm` pool (`config/resources.yaml`) bounds how many agent nodes run at once. The Main sessions (with their Composer and Recovery subagents) are counted against a separate `llm_control` pool, so a busy graph never blocks the chat.
 - **Upgrading the SDK** while runs are `suspended` or `interrupted` is a release step: the transcript format belongs to the SDK, so drain them first, or accept that a resume can fail (`transcript_incompatible`, Phase 9.4) and the node is rerun. Every run freezes the version it started with (`execution_policy.engine_version`) and its spec digest (`execution_policy.spec_digest`: SHA-256 of the agent's prompt, tool names, delegates and `version`).
 
+**Status (2026-10-23, Person 4): built.**
+- `requirements.txt` pins `claude-agent-sdk==0.2.173` (CLI 2.1.309) and `anthropic==2.2.0`. The SDK needs `mcp>=1.23,<3`, which fits the AutoGen cap `mcp<2` (it resolves to mcp 1.30 with fastmcp and autogen-ext). The spike's tool, `defer` and resume checks pass on mcp 1.30 too.
+- `Dockerfile.agents` sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. The gateway also sets it per session.
+- `storage_paths` adds `AGENT_CLI_CWD` (`cache/agent_cwd`), `AGENT_CLI_CONFIG_ROOT` (`temp/agent_cli`) and `new_agent_cli_config_dir()`, and `ensure_storage_layout()` creates both. Deleting a session's config dir is the engine's job (9.4). The write guard refuses only retired workspace paths, so both trees are writable (`tests/unit/services/test_agent_cli_storage.py`).
+- `config/resources.yaml` has the `llm_control` pool.
+- `toolkit/engines/versions.py` has `engine_version()` and `spec_digest(prompt, tool_names, delegates, version)`. The engine freezes them on the run in 9.4.
+
 ## Phase 9.2 — Model Gateway on LiteLLM (`harness/model_gateway.py`, `config/models.yaml`, `deploy/litellm/config.yaml`)
 
 1. **The LiteLLM service** (`deploy/docker-compose.backend.gpu.yml`): a pinned `litellm` image started with `deploy/litellm/config.yaml`, a `LITELLM_MASTER_KEY`, and **no database** (no spend UI and no virtual keys; usage comes from the SDK, item 6). Only this service gets the provider credentials (`ANTHROPIC_API_KEY`, cloud credentials, `OLLAMA_API_BASE`). The agents service gets `LITELLM_BASE_URL` and `LITELLM_API_KEY`. The rule "only the Application API gets `DATABASE_URL`" is unchanged.
@@ -1027,6 +1034,15 @@ Also checked: the Stop hook's `{"decision": "block", "reason": …}` makes the a
 6. **Usage:** each SDK session's `ResultMessage.model_usage` (subagents included) is the attempt's usage. It is written once per attempt (`run_attempts.usage`, T5/T6/T7) and once per Main turn (T8, the Composer and Recovery subagents included), and added to `sessions.tokens_used` there. The budgets in Plan 11 use the persisted total plus the running sessions' counters.
 7. **Known limits, written in the docs:** Anthropic does not support routing Claude Code to non-Claude models through a gateway, so tool use on a local model is measured in the `agent-regression` suite before a local alias serves an agent. Sessions that go through a gateway are not eligible for Anthropic's HIPAA configuration (Plan 13).
 
+**Status (2026-10-23, Person 4): built, with these as-built differences.**
+- **Aliases are their own section of `models.yaml`.** `locality`, `claude_native` and `context_window` describe the model, so they sit on the alias; a profile names `alias`, `fallback_alias` and `effort`. `context_window` becomes `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (Phase 9.0 finding 5). `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` also point at the session's alias, next to the Haiku one.
+- **One alias for now:** `cubeai-gpt-oss`, which is gpt-oss:120b-cloud through Ollama's Anthropic-format endpoint (finding 6). It is marked `external`. The Claude and `local_default` entries are commented out until there is a key or a local model.
+- **The LiteLLM service** uses `ghcr.io/berriai/litellm:v1.106.2` and is not published: only the agents container calls it. Provider credentials go in `deploy/litellm.env` (git-ignored; see `litellm.env.example`), not `deploy/.env`, because the agents service reads all of `.env`. `LITELLM_MASTER_KEY` and `OLLAMA_API_BASE` are in `.env.example`.
+- **Item 5:** `/client-config` gets `model_aliases` (profile -> alias, checked against `models.yaml`; an empty alias clears the choice) and `GET /client-config/model-profiles`. `ClientSettingsPanel` has an "Agent Models (LiteLLM)" section. **The provider, base URL and key fields stay** for now, under "Legacy Pipeline Model": `common/llm.py` uses them until Phase 9.7 and the AutoGen code until Plan 17. They go with their last user.
+- **Item 6 (usage)** moves to Phase 9.4 (the engine fills `AgentResult.usage` from `model_usage`) and Plan 10 (writing it on the attempt).
+- `model_gateway()` builds the process gateway from `LITELLM_BASE_URL` / `LITELLM_API_KEY` and the user's choices. `FakeModelGateway` is the fake.
+- Checked end to end with the real image and config: an SDK session configured by `options_for("agent_default", …)` called a tool on gpt-oss, the CLI used a 131,072-token window, and cache reads were above zero.
+
 ## Phase 9.3 — Toolkit contracts for the engine (Plan 1 follow-up)
 
 These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`test_boundary.py`, with `claude_agent_sdk` added to its list): the engine plugs its behaviour in.
@@ -1038,6 +1054,19 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 4. **Removed:** `ToolContext.user_gate()`; `ToolContext.durable()` / `durable_map()` (a tool that works in parts records each finished part in its domain rows and continues from them on a re-call, Definition of Ready item 13); and `Dispatcher(passthrough=…)` (no engine exception crosses dispatch any more).
 5. **The live part of `ToolContext`** gets an `engine_hooks` field next to `event_sink` (the session's pause flag and the node's mailbox). It is left out of `to_payload()`, like the other live fields.
 6. **The Main's long-lived session:** `open_main(spec, ctx) -> MainSession` (starts the session with `session_id` = the CUBE.AI session id, or resumes it from the store) and `turn(session, message, cancel) -> AgentResult`, next to `run()` on the engine (the Main keeps one `ClaudeSDKClient` across turns, Plan 12.4). `FakeAgentEngine` gets the same two methods.
+
+**Status (2026-10-23, Person 4): built (`toolkit/agents/engine.py`, `tests/unit/toolkit/test_engine.py`).**
+- **`Suspension`:** an `ask_user` or `tool_approval` suspension needs the deferred call's `tool_use_id`; a `pause` has none.
+- **`Resume(value)` and `Resume.continue_()`** (a continue carries no value).
+- **`EngineHooks`** has `pause` (an `asyncio.Event`) and `mailbox` (an `asyncio.Queue`). It is the live `ToolContext.engine_hooks` field, carried to tool calls and kept out of the payload.
+- **`MainSession`** is a protocol with `spec`, `ctx`, `session_id`, `resumed` and an `async close()` (an addition, for Phase 12.4's stop). The `AgentEngine` protocol has `run(…, resume)`, `open_main` and `turn`.
+- **`FakeAgentEngine`:**
+  - A script is a result, a sequence of results played one per call (for example a suspension, then the result after the resume), or an async function. A function keeps `run()`'s positional arguments, and gets `resume=` only when it declares it, so existing scripts (the Node Runner's tests) work unchanged.
+  - `turns=` scripts the Main the same way (`TurnCall`).
+  - A second `open_main` of the same session comes back `resumed`.
+- **Item 4** was already done: none of `user_gate`, `durable`, `durable_map` or `passthrough` is left.
+- **`test_boundary.py`** also forbids `claude_agent_sdk`, `anthropic` and `litellm` outside `toolkit/engines/`.
+- Item 3 (`ask_user`) is Person 2's.
 
 ## Phase 9.4 — `ClaudeAgentEngine` (`toolkit/engines/claude_engine.py`, `options.py`, `mcp_bridge.py`, `hooks.py`)
 
