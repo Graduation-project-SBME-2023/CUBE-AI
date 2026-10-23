@@ -417,7 +417,8 @@ def test_describe_an_agent():
     assert segmentation["output_schema"] is None
     assert (segmentation["effort"], segmentation["skills"]) == (None, [])
     assert segmentation["gate_timeout_s"] is None
-    assert not {"gates", "human_in_the_loop", "workflow", "max_context_tokens"} & segmentation.keys()
+    assert segmentation["max_context_tokens"] is None
+    assert not {"gates", "human_in_the_loop", "workflow"} & segmentation.keys()
     assert composer["parent"] == "main_agent"
     assert composer["tools"] == "dynamic"
     assert composer["output_schema"]["title"] == "_Proposal"

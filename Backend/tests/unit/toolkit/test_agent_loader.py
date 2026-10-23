@@ -129,6 +129,7 @@ def test_every_front_matter_field(pack):
         gate_timeout_s: 86400
         effort: high
         skills: [segmentation_choices]
+        max_context_tokens: 131072
         ---
         Segment.
         """,
@@ -158,6 +159,7 @@ def test_every_front_matter_field(pack):
     assert spec.gate_timeout_s == 86400
     assert spec.effort is Effort.HIGH
     assert spec.skills == ("segmentation_choices",)
+    assert spec.max_context_tokens == 131072
 
 
 def test_every_hook_is_attached(pack):
@@ -270,7 +272,8 @@ def test_a_directory_without_hooks_needs_no_package(pack):
         ("summary: ResultSummary", "summary: ResultSummary[]!", "is not Type"),
         ("kind: execution\n", "kind: execution\ngates: [cohort_approval]\n", "no fixed gate inside a node"),
         ("kind: execution\n", "kind: execution\nworkflow: [pico_analyst]\n", "list the internal agents under delegates"),
-        ("kind: execution\n", "kind: execution\nmax_context_tokens: 60000\n", "the SDK compacts the session"),
+        ("kind: execution\n", "kind: execution\nmax_context_tokens: 60000\n", "max_context_tokens must be an int >= 100,000"),
+        ("kind: execution\n", "kind: execution\nmax_context_tokens: '131072'\n", "max_context_tokens: Input should be a valid integer"),
         ("kind: execution\n", "kind: execution\nbuild_graph: x\n", "build_graph: Extra inputs are not permitted"),
         ("kind: execution\n", "kind: execution\neffort: extreme\n", "effort='extreme'"),
         ("kind: execution\n", "kind: execution\nmax_budget_usd: '2'\n", "max_budget_usd: Input should be a valid number"),

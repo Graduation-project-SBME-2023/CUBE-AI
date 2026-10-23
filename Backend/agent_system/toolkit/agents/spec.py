@@ -9,8 +9,9 @@ file by the loader (Plan 3); nothing here reads files.
 The engine (Plan 9) maps the fields onto the Claude Agent SDK:
 ``max_tool_iterations`` is ``max_turns``, ``max_budget_usd`` is the run's
 ``max_budget_usd``, ``effort`` is the session's (or the subagent's) effort,
-``skills`` are the ``cubeai`` plugin's skills the session may load, and
-``delegates`` are its subagents.
+``skills`` are the ``cubeai`` plugin's skills the session may load,
+``max_context_tokens`` is the session's ``CLAUDE_CODE_AUTO_COMPACT_WINDOW``,
+and ``delegates`` are its subagents.
 
 Like ``ToolSpec``, this module only checks each field on its own. The rules
 that need other specs (unknown or non-internal delegates, delegation cycles,
@@ -59,6 +60,10 @@ AGENT_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # Skill names are the directory names of the cubeai plugin's skills (Phase 3.5).
 SKILL_NAME_PATTERN = AGENT_TYPE_PATTERN
 
+# The smallest compaction window the SDK applies (Phase 9.0, finding 5): a
+# smaller CLAUDE_CODE_AUTO_COMPACT_WINDOW is ignored, so it is refused here.
+MIN_CONTEXT_WINDOW = 100_000
+
 # Tools every execution agent gets without listing them: the SDK's
 # AskUserQuestion (free questions) and TaskCreate / TaskUpdate (progress
 # steps), and ask_user (the domain forms) for the agents that own a form
@@ -98,6 +103,10 @@ def _check_agent_name(value: Any, what: str) -> str:
     if not isinstance(value, str) or not AGENT_TYPE_PATTERN.match(value):
         raise ValueError(f"{what} {value!r} must match {AGENT_TYPE_PATTERN.pattern}")
     return value
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _is_number(value: Any) -> bool:
@@ -189,6 +198,11 @@ class AgentSpec:
     effort: Effort | None = None
     skills: tuple[str, ...] = ()
 
+    # --- the session's compaction window (CLAUDE_CODE_AUTO_COMPACT_WINDOW; the
+    # SDK compacts at the window - 33,000 tokens). None takes the model
+    # profile's window, which the Model Gateway sets per alias (Phase 9.2).
+    max_context_tokens: int | None = None
+
     def __post_init__(self) -> None:
         # Frozen dataclass: normalised values go through object.__setattr__.
         def _set(name: str, value: Any) -> None:
@@ -264,6 +278,13 @@ class AgentSpec:
             not _is_number(self.gate_timeout_s) or not self.gate_timeout_s > 0
         ):
             raise ValueError(f"agent {name!r}: gate_timeout_s must be > 0 or None")
+        if self.max_context_tokens is not None and (
+            not _is_int(self.max_context_tokens) or self.max_context_tokens < MIN_CONTEXT_WINDOW
+        ):
+            raise ValueError(
+                f"agent {name!r}: max_context_tokens must be an int >= {MIN_CONTEXT_WINDOW:,} "
+                "(the SDK ignores a smaller compaction window) or None"
+            )
         if self.effort is not None:
             _set("effort", coerce_enum(Effort, self.effort, "effort"))
         _set("skills", _names(self.skills, f"agent {name!r}: skills", SKILL_NAME_PATTERN))

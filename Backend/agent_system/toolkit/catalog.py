@@ -244,7 +244,7 @@ TOOL_MANIFEST = (
 AGENT_MANIFEST = (
     "model_profile", "delegates", "max_tool_iterations", "timeout_s", "max_budget_usd",
     "resources", "max_completion_retries", "resumable", "parent", "gate_timeout_s",
-    "effort", "skills",
+    "effort", "skills", "max_context_tokens",
 )  # fmt: skip
 
 

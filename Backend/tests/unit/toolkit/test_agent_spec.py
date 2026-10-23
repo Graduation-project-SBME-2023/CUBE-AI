@@ -14,7 +14,13 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from agent_system.toolkit.agents.spec import IMPLICIT_TOOLS, AgentKind, AgentSpec, Effort
+from agent_system.toolkit.agents.spec import (
+    IMPLICIT_TOOLS,
+    MIN_CONTEXT_WINDOW,
+    AgentKind,
+    AgentSpec,
+    Effort,
+)
 from agent_system.toolkit.ports import ExtractedArtifact, PortSpec
 from agent_system.toolkit.manifest import Resource
 from agent_system.toolkit.tools.spec import ToolSpec
@@ -92,6 +98,7 @@ def test_defaults_and_normalisation():
     assert spec.effort is None
     assert spec.skills == ()
     assert spec.max_budget_usd is None
+    assert spec.max_context_tokens is None  # the model profile's window
     assert spec.on_complete is None
 
 
@@ -279,6 +286,10 @@ def test_allowlist_function_result_is_checked():
         ({"skills": ["Modeling"]}, ValueError, "skills entry"),
         ({"skills": ["modeling", "modeling"]}, ValueError, "more than once"),
         ({"max_budget_usd": 0}, ValueError, "max_budget_usd"),
+        # The SDK ignores a compaction window under 100,000 (Phase 9.0, finding 5).
+        ({"max_context_tokens": 99_999}, ValueError, "max_context_tokens must be an int >= 100,000"),
+        ({"max_context_tokens": 131072.0}, ValueError, "max_context_tokens"),
+        ({"max_context_tokens": True}, ValueError, "max_context_tokens"),
         ({"max_budget_usd": True}, ValueError, "max_budget_usd"),
     ],
 )
@@ -292,13 +303,19 @@ def test_malformed_fields_are_refused(overrides, error, match):
 
 def test_sdk_fields():
     spec = _agent(
-        effort="xhigh", skills=["segmentation_choices"], max_budget_usd=2.5, gate_timeout_s=86400
+        effort="xhigh",
+        skills=["segmentation_choices"],
+        max_budget_usd=2.5,
+        gate_timeout_s=86400,
+        max_context_tokens=131_072,
     )
 
     assert spec.effort is Effort.XHIGH
     assert spec.skills == ("segmentation_choices",)
     assert spec.max_budget_usd == 2.5
     assert spec.gate_timeout_s == 86400  # no gate needed: any suspension counts
+    assert spec.max_context_tokens == 131_072
+    assert _agent(max_context_tokens=MIN_CONTEXT_WINDOW).max_context_tokens == 100_000
 
 
 @pytest.mark.parametrize("field", ["human_in_the_loop", "gates", "workflow", "build_graph"])

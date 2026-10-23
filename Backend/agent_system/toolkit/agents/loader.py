@@ -28,10 +28,10 @@ the same labels ``catalog.index()`` shows. Every problem is raised as an
 ``AgentFileError`` that names the file.
 
 The front matter carries the Claude Agent SDK fields too (``effort``,
-``skills``, ``max_budget_usd``, ``gate_timeout_s``; see ``AgentSpec``). The
-fields of the design before the SDK (``gates``, ``workflow``,
-``human_in_the_loop``, ``max_context_tokens``) are refused with a message
-that names what replaced them.
+``skills``, ``max_budget_usd``, ``gate_timeout_s``, ``max_context_tokens``;
+see ``AgentSpec``). The fields of the design before the SDK (``gates``,
+``workflow``, ``human_in_the_loop``) are refused with a message that names
+what replaced them.
 """
 
 from __future__ import annotations
@@ -79,7 +79,6 @@ _RETIRED = {
         "list the internal agents under delegates: they are SDK subagents, "
         "used in any order (Phase 9.6)"
     ),
-    "max_context_tokens": "the SDK compacts the session by itself",
 }
 
 _PORT_LABEL = re.compile(r"^(?P<type>[A-Za-z_][A-Za-z0-9_]*)(?P<many>\[\])?(?P<optional>\?)?$")
@@ -122,6 +121,7 @@ class AgentFrontMatter(BaseModel):
     gate_timeout_s: float | None = None
     effort: str | None = None
     skills: list[str] = Field(default_factory=list)
+    max_context_tokens: int | None = None
 
 
 def load_agent_file(path: Path, package: str | None = None) -> AgentSpec:
