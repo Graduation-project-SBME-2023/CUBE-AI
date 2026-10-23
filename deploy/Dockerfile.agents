@@ -45,5 +45,9 @@ ENV BACKEND_STORAGE_ROOT=/storage \
     HF_HOME=/storage/cache/huggingface \
     PYTHONPATH=/app/Backend
 
+# The Claude Code CLI that claude-agent-sdk bundles (Phase 9.1): no telemetry,
+# update checks or other traffic beyond the model calls.
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
 # Default command
 CMD ["python", "./Backend/agent_system/app.py"]

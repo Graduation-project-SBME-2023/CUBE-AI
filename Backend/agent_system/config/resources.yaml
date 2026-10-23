@@ -7,7 +7,12 @@
 # (UNKNOWN_RESOURCE). Data only: this directory has no __init__.py.
 v: 1
 pools:
+  # One Claude Code CLI subprocess per running SDK session, ~250 MB each
+  # (Phase 9.0 finding 19). `llm` bounds the agent nodes; the Main sessions
+  # (their Composer and Recovery subagents included) use `llm_control`, so a
+  # busy graph never blocks the chat (Phase 9.1).
   llm: 4
+  llm_control: 4
   cpu_heavy: 2
   gpu: 1
   highmem: 1

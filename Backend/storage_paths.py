@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Final
 
@@ -69,6 +70,11 @@ RADIOLOGY_STATE_DIR: Final[Path] = _resolve_configured_path(
         BACKEND_STORAGE_ROOT / "state" / "radiology",
     )
 )
+# The Claude Code CLI behind every SDK session (Phase 9.1). One fixed working
+# directory for all of them, because the session store's project_key is derived
+# from it; and a fresh config directory per session, deleted when it ends.
+AGENT_CLI_CWD: Final[Path] = CACHE_DIR / "agent_cwd"
+AGENT_CLI_CONFIG_ROOT: Final[Path] = TEMP_DIR / "agent_cli"
 
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _STATE_FILES = {
@@ -162,6 +168,13 @@ def ws_sub(session_id: str, logical: str | os.PathLike[str]) -> Path:
     return workspace_subpath(workspace(session_id), logical)
 
 
+def new_agent_cli_config_dir() -> Path:
+    """A new, empty ``CLAUDE_CONFIG_DIR`` for one SDK session. The caller
+    deletes it when the session ends (the transcript's copy is in the store)."""
+    AGENT_CLI_CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="session-", dir=AGENT_CLI_CONFIG_ROOT))
+
+
 def ensure_storage_layout() -> None:
     """Create the fixed runtime roots; session subfolders remain on-demand."""
     for path in (
@@ -179,6 +192,8 @@ def ensure_storage_layout() -> None:
         CACHE_DIR / "huggingface",
         CACHE_DIR / "monailabel",
         CACHE_DIR / "literature",
+        AGENT_CLI_CWD,
+        AGENT_CLI_CONFIG_ROOT,
         LOGS_DIR / "agent-system",
         LOGS_DIR / "radiology",
         LOGS_DIR / "nginx",
@@ -222,6 +237,9 @@ __all__ = [
     "LOGS_DIR",
     "TEMP_DIR",
     "RADIOLOGY_STATE_DIR",
+    "AGENT_CLI_CWD",
+    "AGENT_CLI_CONFIG_ROOT",
+    "new_agent_cli_config_dir",
     "workspace",
     "workspace_subpath",
     "ws_sub",
