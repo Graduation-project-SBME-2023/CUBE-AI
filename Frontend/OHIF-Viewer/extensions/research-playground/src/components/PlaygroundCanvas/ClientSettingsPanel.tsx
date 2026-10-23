@@ -48,6 +48,23 @@ const DEFAULTS: FormState = {
     top_p: '',
 };
 
+// One row per model profile of the agent engine (config/models.yaml): the
+// LiteLLM alias in use, the profile's own default, and the aliases it may use.
+interface ModelProfileRow {
+    profile: string;
+    alias: string;
+    default_alias: string;
+    aliases: { name: string; locality: string }[];
+}
+
+const PROFILE_LABELS: Record<string, string> = {
+    main: 'Main agent (chat)',
+    composer: 'Composer (plans)',
+    recovery: 'Recovery',
+    agent_default: 'Execution agents',
+    extraction: 'Cohort labels',
+};
+
 interface ClientSettingsPanelProps {
     isOpen: boolean;
     onClose: () => void;
@@ -61,10 +78,29 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
     const [dirtyFields, setDirtyFields] = useState<Set<string>>(new Set());
     const [isTesting, setIsTesting] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+    const [profiles, setProfiles] = useState<ModelProfileRow[]>([]);
+    const [aliasChoices, setAliasChoices] = useState<Record<string, string>>({});
+    const [aliasesDirty, setAliasesDirty] = useState(false);
+
+    const loadProfiles = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/client-config/model-profiles`);
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+            const rows: ModelProfileRow[] = (await res.json()).profiles || [];
+            setProfiles(rows);
+            setAliasChoices(Object.fromEntries(rows.map(row => [row.profile, row.alias])));
+            setAliasesDirty(false);
+        } catch {
+            setProfiles([]);
+        }
+    }, []);
 
     // Load current config, reusing the shared cache so opening this panel
     // right after the dashboard's own status check doesn't re-fetch.
     const loadConfig = useCallback(async (options: { force?: boolean } = {}) => {
+        loadProfiles();
         try {
             const data = await fetchClientConfig(options);
             setForm({
@@ -87,7 +123,7 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
         } catch {
             // backend not reachable
         }
-    }, []);
+    }, [loadProfiles]);
 
     useEffect(() => {
         if (isOpen) loadConfig();
@@ -117,6 +153,15 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                 payload[field] = value;
             }
         });
+        if (aliasesDirty) {
+            // An alias equal to the profile's default is sent empty, which clears the choice.
+            payload.model_aliases = Object.fromEntries(
+                profiles.map(row => {
+                    const chosen = aliasChoices[row.profile];
+                    return [row.profile, chosen === row.default_alias ? '' : chosen];
+                })
+            );
+        }
         return payload;
     };
 
@@ -141,6 +186,7 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
             invalidateClientConfig();
             setStatus({ ok: true, msg: `Saved: ${config.provider} / ${config.model}` });
             setDirtyFields(new Set());
+            setAliasesDirty(false);
         } catch (e: any) {
             setStatus({ ok: false, msg: e.message || 'Failed to save' });
         } finally {
@@ -194,6 +240,47 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto ohif-scrollbar px-6 py-4 space-y-3.5">
+                    {/* Agent engine: a LiteLLM alias per model profile */}
+                    {profiles.length > 0 && (
+                        <div className="pb-3 border-b border-[#1f2d40]">
+                            <h4 className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2">
+                                Agent Models (LiteLLM)
+                            </h4>
+                            <div className="space-y-2">
+                                {profiles.map(row => (
+                                    <div key={row.profile} className="flex items-center gap-3">
+                                        <span className="w-40 shrink-0 text-xs text-gray-300">
+                                            {PROFILE_LABELS[row.profile] || row.profile}
+                                        </span>
+                                        <select
+                                            value={aliasChoices[row.profile] ?? row.alias}
+                                            onChange={e => {
+                                                const value = e.target.value;
+                                                setAliasChoices(prev => ({ ...prev, [row.profile]: value }));
+                                                setAliasesDirty(true);
+                                            }}
+                                            className="flex-1 bg-[#151a1f] border border-[#3c5d80]/40 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#5acce6]"
+                                        >
+                                            {row.aliases.map(alias => (
+                                                <option key={alias.name} value={alias.name}>
+                                                    {alias.name} ({alias.locality})
+                                                    {alias.name === row.default_alias ? ' · default' : ''}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                ))}
+                            </div>
+                            <p className="text-[9px] text-gray-600 mt-2">
+                                Which models the aliases reach is set in deploy/litellm/config.yaml.
+                            </p>
+                        </div>
+                    )}
+
+                    <h4 className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
+                        Legacy Pipeline Model
+                    </h4>
+
                     {/* Provider */}
                     <div>
                         <label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 font-bold">Provider</label>

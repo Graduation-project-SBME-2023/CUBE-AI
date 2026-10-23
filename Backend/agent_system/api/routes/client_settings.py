@@ -12,6 +12,12 @@ from client_config import (
     create_model_client_from_config,
     save_config_to_disk,
 )
+from agent_system.harness.model_gateway import (
+    ModelConfigError,
+    alias_choices,
+    check_user_aliases,
+    load_model_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +54,10 @@ async def update_config(payload: dict):
                 current_dict["api_key"] = None
             elif key == "api_key" and (value == "" or value == "***"):
                 continue
+            elif key == "model_aliases":
+                # merged per profile; an empty alias returns the profile to its default
+                merged = {**current_dict.get("model_aliases", {}), **(value or {})}
+                current_dict[key] = check_user_aliases(load_model_config(), merged)
             else:
                 current_dict[key] = value
                 
@@ -93,6 +103,18 @@ async def test_client_config(payload: dict = None):
     except Exception as e:
         logger.error(f"Error testing client config: {e}")
         return JSONResponse(status_code=400, content={"status": "error", "message": f"❌ Connection failed: {str(e)}"})
+
+
+@router.get("/client-config/model-profiles")
+async def list_model_profiles():
+    """The agent engine's model profiles: per profile the alias in use, its
+    default and the LiteLLM aliases it may use (config/models.yaml)."""
+    try:
+        config = load_model_config()
+    except ModelConfigError as e:
+        logger.error("Cannot read the model profiles: %s", e)
+        raise HTTPException(status_code=500, detail="the model profiles cannot be read")
+    return {"profiles": alias_choices(config, get_client_config().model_aliases)}
 
 
 @router.get("/client-config/providers")

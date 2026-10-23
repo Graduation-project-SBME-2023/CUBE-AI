@@ -184,6 +184,12 @@ class ClientConfig(BaseModel):
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
 
+    # The agent engine (Plan 9): the LiteLLM alias the user picked per model
+    # profile (config/models.yaml); a profile left out uses its own alias. The
+    # provider fields above serve only what still runs without the engine
+    # (common/llm.py until Phase 9.7, the frozen AutoGen code until Plan 17).
+    model_aliases: Dict[str, str] = {}
+
 
 # ── Global Store ─────────────────────────────────────────────────────────────
 
