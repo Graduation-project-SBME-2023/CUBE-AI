@@ -9,11 +9,13 @@ Refusals are ``GraphStoreError`` with the Application API's stable codes
 (STALE_BASE, NOT_READY, NEEDS_RELEASE, USER_RELEASE_REQUIRED, ATTEMPT_ACTIVE,
 MAX_ATTEMPTS, ...).
 
-Agent memory (D27): an agent-node run keeps its Claude Agent SDK session as
-opaque transcript entries, written only by the run's latest running or
-suspended attempt and never parsed here; the Main's session is kept the same
-way per CUBE.AI session (D21). An attempt lists the tool calls it is running in
-``pending_tools``, so a restart knows whether a retry is safe (T4 rule (f)).
+Agent memory: an agent-node run keeps its Claude Agent SDK transcript as opaque
+entries, written only by the run's latest running or suspended attempt and
+never parsed here. The SDK's session id (``sdk_session_id``) is the run id for
+an agent node and the CUBE.AI ``session_id`` for the Main; ``session_id`` alone
+always means the CUBE.AI session. An attempt lists the tool calls it is running
+in ``pending_tools``, so a restart knows whether a retry is safe: a call that
+was cut off and is not idempotent must not run again automatically.
 """
 
 from __future__ import annotations

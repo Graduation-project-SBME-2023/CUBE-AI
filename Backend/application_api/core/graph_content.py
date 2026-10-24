@@ -62,7 +62,8 @@ class Expectations(_Strict):
 
 class SeedFrom(_Strict):
     """Start a rerun from a message of an earlier run of the same node: the
-    engine forks that run's SDK session up to the message (D27)."""
+    engine forks that run's SDK transcript (its ``sdk_session_id`` is that
+    ``run_id``) up to the message, into a new transcript for the rerun."""
 
     run_id: UUID
     message_uuid: str = Field(min_length=1, max_length=256)

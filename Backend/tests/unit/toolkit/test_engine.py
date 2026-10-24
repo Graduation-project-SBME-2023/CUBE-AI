@@ -211,8 +211,8 @@ def test_the_main_session_opens_then_continues_on_the_next_open():
     first, second = asyncio.run(scenario())
 
     assert isinstance(first, MainSession)
-    assert (first.session_id, first.resumed, first.closed) == ("s1", False, True)
-    assert (second.session_id, second.resumed) == ("s1", True)
+    assert (first.sdk_session_id, first.resumed, first.closed) == ("s1", False, True)
+    assert (second.sdk_session_id, second.resumed) == ("s1", True)
 
 
 def test_main_turns_are_scripted_and_recorded():
@@ -228,7 +228,7 @@ def test_main_turns_are_scripted_and_recorded():
     result = asyncio.run(scenario())
 
     assert result.summary == "you said: count glioma patients"
-    assert [(call.session.session_id, call.message) for call in engine.turn_calls] == [
+    assert [(call.session.sdk_session_id, call.message) for call in engine.turn_calls] == [
         ("s1", "count glioma patients")
     ]
 

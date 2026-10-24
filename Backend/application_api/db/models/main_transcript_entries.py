@@ -16,8 +16,10 @@ from application_api.db.base import Base
 
 
 class MainTranscriptEntry(Base):
-    """One entry of the Main's saved Claude Agent SDK session (D21), one
-    session per CUBE.AI session; the Composer and the Recovery Agent are its
+    """One entry of the Main Agent's saved Claude Agent SDK transcript.
+
+    The Main keeps one transcript per CUBE.AI session: its `sdk_session_id` is
+    the CUBE.AI `session_id`. The Composer and the Recovery Agent are its
     subpaths. Not an execution table, so not fenced; written only by the
     session's own runtime and never a result."""
 

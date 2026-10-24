@@ -1,4 +1,6 @@
-"""Transcript schemas: an agent node's SDK session (D27) and the Main's (D21).
+"""Transcript schemas: an agent node's Claude Agent SDK transcript (keyed by its
+run id, which is its `sdk_session_id`) and the Main's (keyed by the CUBE.AI
+`session_id`).
 
 Entries are the SDK's own JSON objects, stored and returned unchanged; the
 Application API reads only their `uuid`, which makes a re-delivered batch a

@@ -1,8 +1,8 @@
 """Agent-transcript routes: the store behind the Agent System's
-`HttpSessionStore` (D27).
+`HttpSessionStore`.
 
-An agent node's run keeps its Claude Agent SDK session here (`session_id =
-run_id`). The run's latest attempt, running or suspended, appends (it presents
+An agent node's run keeps its Claude Agent SDK transcript here; the SDK's
+session id (`sdk_session_id`) is the run id. The run's latest attempt, running or suspended, appends (it presents
 itself in `X-Attempt-Id`); a read may present the reading attempt, which must
 belong to the run or be the first attempt of a run seeded from it.
 """

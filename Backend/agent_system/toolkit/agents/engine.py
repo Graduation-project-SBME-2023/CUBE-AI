@@ -143,12 +143,15 @@ class EngineHooks:
 
 @runtime_checkable
 class MainSession(Protocol):
-    """The Main Agent's long-lived session (one per CUBE.AI session, D21).
-    ``resumed`` is true when ``open_main()`` found a saved session to continue."""
+    """The Main Agent's long-lived SDK session, one per CUBE.AI session.
+
+    ``sdk_session_id`` is the SDK's id for this session; for the Main it is the
+    CUBE.AI session id (``ctx.session_id``). ``resumed`` is true when
+    ``open_main()`` found a saved session to continue."""
 
     spec: AgentSpec
     ctx: ToolContext
-    session_id: str
+    sdk_session_id: str
     resumed: bool
 
     async def close(self) -> None: ...
@@ -200,7 +203,7 @@ type TurnScript = AgentResult | Sequence[AgentResult] | Callable[..., Awaitable[
 class FakeMainSession:
     spec: AgentSpec
     ctx: ToolContext
-    session_id: str
+    sdk_session_id: str
     resumed: bool = False
     closed: bool = False
 
@@ -251,7 +254,7 @@ class FakeAgentEngine:
         """Like the real engine, a second open of the same CUBE.AI session
         continues the saved one instead of starting fresh."""
         resumed = ctx.session_id in self.main_sessions
-        session = FakeMainSession(spec=spec, ctx=ctx, session_id=ctx.session_id, resumed=resumed)
+        session = FakeMainSession(spec=spec, ctx=ctx, sdk_session_id=ctx.session_id, resumed=resumed)
         self.main_sessions[ctx.session_id] = session
         return session
 

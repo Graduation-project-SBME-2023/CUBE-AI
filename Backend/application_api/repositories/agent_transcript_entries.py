@@ -1,7 +1,7 @@
-"""Agent-transcript repository: the store behind `HttpSessionStore` (D27).
+"""Agent-transcript repository: the store behind `HttpSessionStore`.
 
-An agent node keeps one Claude Agent SDK session per run (`session_id =
-run_id`). Writes come only from the run's latest attempt while it is running or
+An agent node keeps one Claude Agent SDK transcript per run; the SDK's session
+id (`sdk_session_id`) is the run id. Writes come only from the run's latest attempt while it is running or
 suspended (the attempt path, checked by the fencing trigger); any attempt of
 the run reads, and so does the first attempt of a run seeded from it. Entries
 are opaque: stored and returned unchanged, never parsed. The purge, on the

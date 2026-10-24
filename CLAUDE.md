@@ -246,6 +246,13 @@ fails keeps the API from serving, and the restart policy retries it.
   `approval: before | after` (D28) yields `NEEDS_RELEASE` and the `user_review` hold, and only a
   change the user authored releases either (`USER_RELEASE_REQUIRED`, also enforced by a trigger).
   Without an approval asked for, the cohort is frozen `auto` and a batch `auto_accepted`.
+- **Two session ids: ours is `session_id`, the SDK's is `sdk_session_id`.** `session_id` always
+  means the CUBE.AI session (the `sessions` row, the `/ws?session_id=` socket, every route and
+  column). The Claude Agent SDK's own session id (its transcript) is written `sdk_session_id` in
+  code, comments and docs, never bare `session_id`: for an agent node it is the `run_id` (every
+  attempt of a run continues one transcript; a rerun starts a new one), for the Main it is the
+  CUBE.AI `session_id`. The SDK's own APIs still call it `session_id` (`SessionStore` keys,
+  `ClaudeAgentOptions`); rename it to `sdk_session_id` where our code receives it.
 
 ### Generated-data boundary
 

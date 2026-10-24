@@ -1,5 +1,6 @@
-"""Main-transcript routes: the Main's saved Claude Agent SDK session (D21),
-one per CUBE.AI session, with the Composer and the Recovery Agent as subpaths.
+"""Main-transcript routes: the Main's saved Claude Agent SDK transcript, one per
+CUBE.AI session (its `sdk_session_id` is the CUBE.AI `session_id`), with the
+Composer and the Recovery Agent as subpaths.
 Owner-checked; the session's own runtime is the one writer."""
 
 from uuid import UUID

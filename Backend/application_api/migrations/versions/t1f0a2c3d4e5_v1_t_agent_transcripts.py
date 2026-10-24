@@ -3,9 +3,11 @@
 Appendix P revision 3.4 (D27 rewritten, D28 new):
 
 1. `agent_checkpoints` and `agent_checkpoint_writes` (LangGraph) are dropped;
-   `agent_transcript_entries` (an agent node's Claude Agent SDK session, one per
-   run) takes their place under the shared fencing trigger, and
-   `main_transcript_entries` holds the Main's session (D21, not fenced);
+   `agent_transcript_entries` (an agent node's Claude Agent SDK transcript, one
+   per run: its `sdk_session_id` is the `run_id`; the `session_id` column is the
+   CUBE.AI session) takes their place under the shared fencing trigger, and
+   `main_transcript_entries` holds the Main's transcript (its `sdk_session_id`
+   is the CUBE.AI `session_id`; not fenced);
 2. `run_attempts.pending_tools`; the `suspension` contract is v2
    (`ask_user | tool_approval | pause`, `tool_use_id`, `form`): a suspension
    no longer waits for a stored checkpoint;

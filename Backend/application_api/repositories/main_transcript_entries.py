@@ -1,7 +1,7 @@
-"""Main-transcript repository: the Main's saved Claude Agent SDK session (D21).
+"""Main-transcript repository: the Main's saved Claude Agent SDK transcript.
 
-One session per CUBE.AI session (the SDK's `session_id` is the CUBE.AI session
-id); the Composer and the Recovery Agent are its subpaths. Not an execution
+One transcript per CUBE.AI session (its `sdk_session_id` is the CUBE.AI
+`session_id`); the Composer and the Recovery Agent are its subpaths. Not an execution
 table: the session's own runtime is the one writer (one Agent System worker),
 and the routes check ownership. Entries are opaque and never a result.
 """

@@ -16,10 +16,13 @@ from application_api.db.base import Base
 
 
 class AgentTranscriptEntry(Base):
-    """One entry of an agent node's Claude Agent SDK session (D27). The
-    session is the run (`session_id = run_id`); `subpath` is '' for the main
-    transcript and the SDK's opaque subpath for a subagent. Reasoning state,
-    never a result: stored and returned unchanged, never parsed here."""
+    """One entry of an agent node's Claude Agent SDK transcript.
+
+    The SDK's session id (`sdk_session_id`) of an agent node is its run id, so
+    entries are keyed by `run_id`. `session_id` is the CUBE.AI session the run
+    belongs to, not the SDK's id. `subpath` is '' for the agent's own transcript
+    and the SDK's opaque subpath for a subagent. Reasoning state, never a
+    result: stored and returned unchanged, never parsed here."""
 
     __tablename__ = "agent_transcript_entries"
 
