@@ -157,7 +157,7 @@ In the first days, each person merges the contracts of their area: the types and
 
 | Contract | Owner | Where | Fake the others use |
 |---|---|---|---|
-| `JobClient`, `JobRequest`, `JobRecord`, the job statuses (Phase 5.1) | Person 1 | `jobs_core/` | `jobs_core/backends/in_memory.py` |
+| `JobClient`, `JobRequest`, `JobRecord`, the job statuses (Phase 5.1, built 2026-10-24) | Person 1 | `jobs_core/` (`client.py`, `contract.py`, `status.py`) | `InMemoryJobClient` in `jobs_core/backends/in_memory.py` |
 | The ports and `graph` visibility of `run_modeling` and the heavy tools (Phases 7.1, 7.3) | Person 1 | `toolpacks/modeling/`, `toolpacks/radiomics/` | the tools themselves against `fake_domain_api` |
 | `agent.md` format and loader, the specs, reworked for the SDK (Phase 3.0) | Person 2 | `toolkit/agents/loader.py`, `agentpacks/` | the real loader with draft prompts |
 | The `ask_user` tool (Phase 9.3 item 3) | Person 2 | `toolpacks/interaction/` | the real tool on `FakeAgentEngine` with a scripted suspension |
