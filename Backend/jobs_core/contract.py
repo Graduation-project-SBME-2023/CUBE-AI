@@ -1,4 +1,4 @@
-"""The job contract: how a job is named, requested and recorded (merged plan, Phase 5.1).
+"""The job contract: how a job is named, requested and recorded.
 
 Two ids name a job, and they mean different things:
 
@@ -31,11 +31,15 @@ from .status import JobStatus
 # Application API image does not contain it), so test_contract_matches_toolkit.py
 # checks that these stay equal to toolkit/manifest.py.
 JOB_NAME_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"  # = TOOL_NAME_PATTERN
-RESOURCE_CLASSES = ("compute.gpu", "compute.highmem", "compute.cpu")  # = RESOURCE_QUEUES
 MIN_PRIORITY = 0
 MAX_PRIORITY = 9
 
-ResourceClass = Literal["compute.gpu", "compute.highmem", "compute.cpu"]
+# Where a job runs. The compute.* classes are the job queue's queues (the same
+# names as the toolkit's RESOURCE_QUEUES); monai.gpu is MONAI Label, which owns
+# the GPU, so there is no compute queue for the GPU.
+RESOURCE_CLASSES = ("compute.highmem", "compute.cpu", "monai.gpu")
+
+ResourceClass = Literal["compute.highmem", "compute.cpu", "monai.gpu"]
 
 
 class ErrorCode(StrEnum):
@@ -47,8 +51,12 @@ class ErrorCode(StrEnum):
     oom                   out of memory (``MemoryError``, or killed with exit code 137)
     interrupted           the worker died or shut down while the job ran
     cancelled             someone cancelled it
-    run_not_running       its attempt was no longer the run's active one when it started (H20)
-    resource_unavailable  MONAI stayed busy (429) past the ``unavailable_s`` budget
+    run_not_running       its attempt was no longer the run's active one when it started
+    resource_unavailable  the backend kept refusing for now (MONAI busy, the queue full)
+                          past the ``unavailable_s`` budget
+    protocol_error        the backend kept reporting something outside the contract (an
+                          unknown status) until the waiter's budget ran out; the waiter
+                          cancelled the job rather than guess whether it still runs
     """
 
     ERROR = "error"
@@ -59,6 +67,7 @@ class ErrorCode(StrEnum):
     CANCELLED = "cancelled"
     RUN_NOT_RUNNING = "run_not_running"
     RESOURCE_UNAVAILABLE = "resource_unavailable"
+    PROTOCOL_ERROR = "protocol_error"
 
 
 # Which error codes each status may carry. A status missing here (QUEUED,
@@ -70,6 +79,7 @@ ERROR_CODES_BY_STATUS: dict[JobStatus, frozenset[ErrorCode]] = {
             ErrorCode.OOM,
             ErrorCode.RUN_NOT_RUNNING,
             ErrorCode.RESOURCE_UNAVAILABLE,
+            ErrorCode.PROTOCOL_ERROR,
         }
     ),
     JobStatus.TIMED_OUT: frozenset({ErrorCode.TIMEOUT, ErrorCode.QUEUE_TIMEOUT}),
@@ -139,11 +149,15 @@ class JobRequest(BaseModel):
     job_id           make_job_id(context["run_id"], job_name, args)
     submission_key   make_submission_key(job_id, attempt)
     attempt          the run_attempts number, from 1
-    job_name         a registered tool name, never an import path
+    job_name         a registered job name, never an import path: an
+                     ``execution="job"`` tool, or a MONAI job kind (``monai_infer``)
     job_version      the tool's ToolSpec.version
     args             the tool's arguments (JSON only)
     context          ToolContext.to_payload(); must name the node run
-    resource_class   the queue, copied from ToolSpec.resource_class
+    resource_class   where it runs: a compute queue (ToolSpec.resource_class) or monai.gpu
+    reusable         true only for a job that writes nothing but its result, so a
+                     later attempt may take an earlier attempt's success instead of
+                     running again; a job that writes rows or files is never reusable
     timeout_s        run budget, from the spec
     queue_timeout_s  how long it may wait to start; None = no limit
     priority         MIN_PRIORITY..MAX_PRIORITY, from the spec
@@ -160,6 +174,7 @@ class JobRequest(BaseModel):
     args: dict[str, Any]
     context: dict[str, Any]
     resource_class: ResourceClass
+    reusable: bool
     timeout_s: float = Field(gt=0)
     queue_timeout_s: float | None = Field(gt=0)
     priority: int = Field(ge=MIN_PRIORITY, le=MAX_PRIORITY)

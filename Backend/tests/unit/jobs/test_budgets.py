@@ -36,6 +36,7 @@ def _request(queue_timeout_s: float | None) -> JobRequest:
         args={},
         context={"run_id": RUN_ID},
         resource_class="compute.cpu",
+        reusable=False,
         timeout_s=900.0,
         queue_timeout_s=queue_timeout_s,
         priority=0,

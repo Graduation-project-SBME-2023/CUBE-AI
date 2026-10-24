@@ -22,8 +22,21 @@ def test_job_name_pattern_is_the_tool_name_pattern() -> None:
     assert contract.JOB_NAME_PATTERN == TOOL_NAME_PATTERN.pattern
 
 
-def test_resource_classes_are_the_toolkit_queues() -> None:
-    assert contract.RESOURCE_CLASSES == tuple(queue for _, queue in RESOURCE_QUEUES)
+def _compute_classes() -> set[str]:
+    return {name for name in contract.RESOURCE_CLASSES if name.startswith("compute.")}
+
+
+def test_every_compute_class_is_a_toolkit_queue() -> None:
+    assert _compute_classes() <= {queue for _, queue in RESOURCE_QUEUES}
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="the toolkit still maps the gpu resource to a compute.gpu queue; the GPU is MONAI's",
+)
+def test_the_compute_classes_are_exactly_the_toolkit_queues() -> None:
+    # Passes once the toolkit drops compute.gpu; strict, so this marker must then go.
+    assert _compute_classes() == {queue for _, queue in RESOURCE_QUEUES}
 
 
 def test_priority_bounds_are_the_toolkit_bounds() -> None:
@@ -50,6 +63,7 @@ def test_a_real_tool_context_payload_is_accepted() -> None:
         args=args,
         context=context.to_payload(),
         resource_class="compute.cpu",
+        reusable=False,
         timeout_s=600.0,
         queue_timeout_s=None,
         priority=0,

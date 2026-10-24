@@ -1,4 +1,4 @@
-"""Job ids, submission keys, error codes and the job request (merged plan, Phase 5.1 step 1)."""
+"""Job ids, submission keys, error codes, resource classes and the job request."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from jobs_core.contract import (
     ERROR_CODES_BY_STATUS,
+    RESOURCE_CLASSES,
     ErrorCode,
     JobProgress,
     JobRecord,
@@ -40,7 +41,42 @@ def test_error_codes_are_the_documented_set() -> None:
         "cancelled",
         "run_not_running",
         "resource_unavailable",
+        "protocol_error",
     }
+
+
+def test_a_protocol_error_is_a_failure() -> None:
+    assert ErrorCode.PROTOCOL_ERROR in ERROR_CODES_BY_STATUS[JobStatus.FAILED]
+
+
+# --- resource classes
+
+
+def test_the_gpu_belongs_to_monai_only() -> None:
+    assert "monai.gpu" in RESOURCE_CLASSES
+    assert "compute.gpu" not in RESOURCE_CLASSES
+
+
+@pytest.mark.parametrize("resource_class", RESOURCE_CLASSES)
+def test_every_resource_class_is_accepted(resource_class: str) -> None:
+    request = JobRequest(**_request_fields(resource_class=resource_class))
+    assert request.resource_class == resource_class
+
+
+# --- reusable
+
+
+@pytest.mark.parametrize("reusable", [True, False])
+def test_reusable_is_kept(reusable: bool) -> None:
+    assert JobRequest(**_request_fields(reusable=reusable)).reusable is reusable
+
+
+def test_reusable_must_be_said() -> None:
+    # No default: whoever builds the request decides whether a job may be reused.
+    fields = _request_fields()
+    del fields["reusable"]
+    with pytest.raises(ValidationError, match="reusable"):
+        JobRequest(**fields)
 
 
 def test_each_name_is_its_value_in_capitals() -> None:
@@ -136,6 +172,7 @@ def _request_fields(**overrides: Any) -> dict[str, Any]:
         "args": {"folds": 5, "target": "label"},
         "context": {"session_id": "s-1", "caller": "node", "run_id": RUN_ID},
         "resource_class": "compute.cpu",
+        "reusable": False,
         "timeout_s": 600.0,
         "queue_timeout_s": 60.0,
         "priority": 0,
@@ -190,6 +227,9 @@ def test_a_request_without_queue_timeout_is_refused() -> None:
         {"job_name": "toolpacks.modeling:train"},  # an import path, not a tool name
         {"job_name": "x" * 65},
         {"resource_class": "compute.tpu"},
+        {"resource_class": "compute.gpu"},  # the GPU is MONAI's
+        {"reusable": 1},  # strict: an int is not a bool
+        {"reusable": "true"},
         {"timeout_s": 0},
         {"timeout_s": float("inf")},
         {"queue_timeout_s": 0},
