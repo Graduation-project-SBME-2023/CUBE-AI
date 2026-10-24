@@ -10,6 +10,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/app/Backend/storage_paths.py:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/storage_write_guard.py:/app/Backend/storage_write_guard.py:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/agent_system:/app/Backend/agent_system
+      - ${COMPOSE_PROJECT_DIR}/Backend/jobs_core:/app/Backend/jobs_core:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/Backend/apps/radiology/lib/configs:ro
     environment:
       PYTHONPATH: /app/Backend

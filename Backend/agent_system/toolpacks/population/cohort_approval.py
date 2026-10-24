@@ -11,12 +11,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from jobs_core.polling import PollTimeout, poll_until
+
 from .._toolkit import error_result, tool
 from ..bookkeeping.scratchpad import raise_flag, write_note
 from ..common import domain_api, views
 from ..common.emit import emit, emit_view
 from ..common.manifests import WRITES
-from ..common.polling import PollTimeout, poll_until
 from ..common.settings import positive_float
 
 DEFAULT_APPROVAL_POLL_S = 2.0

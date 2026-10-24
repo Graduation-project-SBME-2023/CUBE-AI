@@ -46,6 +46,8 @@ def test_pycaret_is_not_installed():
         # fell back to pure Python would only show up here.
         "radiomics._cmatrices",
         "radiomics._cshape",
+        # Backend packages the image copies next to agent_system.
+        "jobs_core.polling",
     ],
 )
 def test_the_runtime_imports(module):

@@ -35,6 +35,7 @@ RUN pip install --no-cache-dir git+https://github.com/AIM-Harvard/pyradiomics.gi
 
 # Copy application source
 COPY ./Backend/agent_system ./Backend/agent_system
+COPY ./Backend/jobs_core ./Backend/jobs_core
 COPY ./Backend/storage_paths.py ./Backend/storage_paths.py
 COPY ./Backend/storage_write_guard.py ./Backend/storage_write_guard.py
 
