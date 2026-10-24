@@ -252,6 +252,34 @@ async def a_tool_approval_takes_a_decision_and_a_cancel_is_confirmed_at_once(sto
     assert stopped.state == "cancelled"  # a suspended attempt holds no work
 
 
+async def a_suspend_after_a_cancel_request_is_refused(store: GraphStore) -> None:
+    _, _, started = await running_agent(store)
+    run_id, attempt_id = started.run.run_id, started.attempt.attempt_id
+    await store.request_cancel(run_id, attempt_id, "user")  # the work has not stopped yet
+    question = {"kind": "ask_user", "tool_use_id": "toolu_1", "payload": {"question": "use wavelets?"}}
+    await refused("CANCEL_REQUESTED", store.suspend(run_id, attempt_id, question))
+    await refused("CANCEL_REQUESTED", store.suspend(run_id, attempt_id, {"kind": "pause"}))
+    assert (await store.confirm_stopped(run_id, attempt_id)).state == "cancelled"
+
+
+async def an_ended_attempt_records_its_usage(store: GraphStore) -> None:
+    session_id, _, done = await running_agent(store)
+    outputs = {"v": 1, "ports": {"summary": {
+        "type": "ResultSummary", "ref": {"table": "node_runs", "ids": [done.run.run_id]}, "summary": {},
+    }}}
+    completed = await store.complete_attempt(done.run.run_id, done.attempt.attempt_id, outputs,
+                                             {"v": 1, "input_tokens": 1200, "output_tokens": 300})
+    assert (completed.usage["input_tokens"], completed.usage["output_tokens"]) == (1200, 300)
+    _, _, stopped = await running_agent(store)
+    await store.request_cancel(stopped.run.run_id, stopped.attempt.attempt_id, "user")
+    confirmed = await store.confirm_stopped(stopped.run.run_id, stopped.attempt.attempt_id,
+                                            {"v": 1, "input_tokens": 40, "output_tokens": 2})
+    assert (confirmed.state, confirmed.usage["input_tokens"]) == ("cancelled", 40)
+    _, _, failed = await running_agent(store)
+    ended = await store.fail_attempt(failed.run.run_id, failed.attempt.attempt_id, {"code": "error"})
+    assert ended.usage is None  # nothing reported, nothing stored
+
+
 async def transcripts_are_fenced_and_seeds_checked(store: GraphStore) -> None:
     session_id, agent, first = await running_agent(store, spec="s1", engine="e1", max_attempts=2,
                                                     idempotent=True)
@@ -375,6 +403,8 @@ SCENARIOS: list[Callable[[GraphStore], Awaitable[None]]] = [
     a_cancel_is_confirmed_and_never_retried_automatically,
     a_question_suspends_and_the_same_attempt_resumes,
     a_tool_approval_takes_a_decision_and_a_cancel_is_confirmed_at_once,
+    a_suspend_after_a_cancel_request_is_refused,
+    an_ended_attempt_records_its_usage,
     transcripts_are_fenced_and_seeds_checked,
     pending_tools_decide_the_automatic_retry,
     approval_before_waits_for_the_users_release,

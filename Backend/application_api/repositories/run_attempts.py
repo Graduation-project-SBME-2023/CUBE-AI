@@ -487,7 +487,7 @@ async def reconcile_attempt(
 
 
 # ----------------------------------------------------------------------
-# T10: suspend / answer / resume (the same attempt throughout, I8)
+# Suspend / answer / resume: one attempt waits and continues, never a new one
 # ----------------------------------------------------------------------
 async def suspend_attempt(
     db: AsyncSession, run_id: UUID, attempt_id: UUID, data: schemas.AttemptSuspend
@@ -507,6 +507,13 @@ async def suspend_attempt(
                 f"Attempt {attempt_id} is {attempt.state}"
                 + (" on a superseded run" if t.run.superseded_at else "")
                 + "; only a running attempt of a current run suspends.",
+            )
+        if attempt.cancel_requested_at is not None:
+            # A suspended attempt is confirmed stopped only when the cancel
+            # arrives after it suspended, so it would wait forever here.
+            raise conflict(
+                "CANCEL_REQUESTED",
+                f"Attempt {attempt_id} has a cancel request; confirm its stop instead.",
             )
         attempt.state = "suspended"
         attempt.suspension = {

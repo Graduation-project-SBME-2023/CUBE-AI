@@ -563,10 +563,23 @@ class InMemoryGraphStore:
         else:
             run.status, run.error = ("cancelled" if state == "cancelled" else "failed"), attempt["error"]
 
-    def _end(self, run: _Run, attempt: dict[str, Any], state: str, error: Optional[dict] = None) -> None:
+    @staticmethod
+    def _check_usage(usage: Optional[dict[str, Any]]) -> None:
+        """Refuse a usage the Application API would refuse: {v: 1, input_tokens, output_tokens, model?}."""
+        if usage is None:
+            return
+        counts = [usage.get(key, 0) for key in ("input_tokens", "output_tokens")]
+        if (usage.get("v", 1) != 1 or set(usage) - {"v", "input_tokens", "output_tokens", "model"}
+                or any(isinstance(n, bool) or not isinstance(n, int) or n < 0 for n in counts)):
+            raise _refuse("INVALID", "usage is {v: 1, input_tokens, output_tokens, model?}", 422)
+
+    def _end(self, run: _Run, attempt: dict[str, Any], state: str, error: Optional[dict] = None,
+             usage: Optional[dict[str, Any]] = None) -> None:
         if state != "succeeded":
             error = error or attempt.get("error") or {"code": "cancelled" if state == "cancelled" else state}
         attempt.update(state=state, ended_at=_now(), error=error)
+        if usage is not None:
+            attempt["usage"] = {"v": 1, "input_tokens": 0, "output_tokens": 0, **copy.deepcopy(usage)}
         self._project(run, attempt)
 
     def _require_latest(self, run: _Run, attempt: dict[str, Any]) -> None:
@@ -597,12 +610,13 @@ class InMemoryGraphStore:
         attempt.update(state="running", dispatched_at=attempt.get("dispatched_at") or _now(), started_at=_now())
         return Attempt.model_validate(attempt)
 
-    def _succeed(self, run: _Run, attempt: dict[str, Any], outputs: dict[str, Any]) -> None:
+    def _succeed(self, run: _Run, attempt: dict[str, Any], outputs: dict[str, Any],
+                 usage: Optional[dict[str, Any]] = None) -> None:
         for port in (outputs.get("ports") or {}).values():
             if port.get("ref", {}).get("table") == "node_runs" and port["ref"]["ids"] != [run.run_id]:
                 raise _refuse("INVALID_OUTPUTS", "", 422)
         run.outputs = copy.deepcopy(outputs)
-        self._end(run, attempt, "succeeded")
+        self._end(run, attempt, "succeeded", usage=usage)
         if run.superseded:
             return
         expectations = self.nodes[run.node_id].definition.get("expect") or {}
@@ -619,20 +633,24 @@ class InMemoryGraphStore:
         if self.nodes[run.node_id].definition["approval"] == "after":
             run.downstream_hold = "user_review"
 
-    async def complete_attempt(self, run_id: str, attempt_id: str, outputs: dict[str, Any]) -> Attempt:
+    async def complete_attempt(self, run_id: str, attempt_id: str, outputs: dict[str, Any],
+                               usage: Optional[dict[str, Any]] = None) -> Attempt:
+        self._check_usage(usage)
         run, attempt = self._locate(run_id, attempt_id)
         self._require_latest(run, attempt)
         if attempt["state"] == "suspended":
             raise _refuse("ATTEMPT_SUSPENDED")
-        self._succeed(run, attempt, outputs)
+        self._succeed(run, attempt, outputs, usage)
         return Attempt.model_validate(attempt)
 
-    async def fail_attempt(self, run_id: str, attempt_id: str, error: dict[str, Any]) -> Attempt:
+    async def fail_attempt(self, run_id: str, attempt_id: str, error: dict[str, Any],
+                           usage: Optional[dict[str, Any]] = None) -> Attempt:
+        self._check_usage(usage)
         run, attempt = self._locate(run_id, attempt_id)
         self._require_latest(run, attempt)
         if attempt["state"] == "suspended":
             raise _refuse("ATTEMPT_SUSPENDED")
-        self._end(run, attempt, "failed", error)
+        self._end(run, attempt, "failed", error, usage)
         return Attempt.model_validate(attempt)
 
     def _cancel(self, run: _Run, attempt: dict[str, Any], reason: str) -> None:
@@ -646,9 +664,9 @@ class InMemoryGraphStore:
         if attempt["state"] == "suspended":
             self._confirm(run, attempt)
 
-    def _confirm(self, run: _Run, attempt: dict[str, Any]) -> None:
+    def _confirm(self, run: _Run, attempt: dict[str, Any], usage: Optional[dict[str, Any]] = None) -> None:
         code = (attempt.get("error") or {}).get("code")
-        self._end(run, attempt, "failed" if code in TIMEOUT_CODES else "cancelled")
+        self._end(run, attempt, "failed" if code in TIMEOUT_CODES else "cancelled", usage=usage)
 
     async def request_cancel(self, run_id: str, attempt_id: str, reason: str = "user") -> Attempt:
         run, attempt = self._locate(run_id, attempt_id)
@@ -657,13 +675,15 @@ class InMemoryGraphStore:
         self._cancel(run, attempt, reason)
         return Attempt.model_validate(attempt)
 
-    async def confirm_stopped(self, run_id: str, attempt_id: str) -> Attempt:
+    async def confirm_stopped(self, run_id: str, attempt_id: str,
+                              usage: Optional[dict[str, Any]] = None) -> Attempt:
+        self._check_usage(usage)
         run, attempt = self._locate(run_id, attempt_id)
         if attempt["state"] in TERMINAL:
             return Attempt.model_validate(attempt)
         if not attempt.get("cancel_requested_at"):
             raise _refuse("NO_CANCEL_REQUEST")
-        self._confirm(run, attempt)
+        self._confirm(run, attempt, usage)
         return Attempt.model_validate(attempt)
 
     async def reconcile(self, run_id: str, attempt_id: str, observed: str,
@@ -697,7 +717,7 @@ class InMemoryGraphStore:
         return Attempt.model_validate(attempt), action
 
     # ------------------------------------------------------------------
-    # T10: suspend, answer, resume (the same attempt throughout, I8)
+    # Suspend, answer, resume: one attempt waits and continues, never a new one
     # ------------------------------------------------------------------
     async def suspend(self, run_id: str, attempt_id: str, suspension: dict[str, Any]) -> Attempt:
         run, attempt = self._locate(run_id, attempt_id)
@@ -711,6 +731,10 @@ class InMemoryGraphStore:
             return Attempt.model_validate(attempt)  # a replayed suspend
         if attempt["state"] != "running" or run.superseded or attempt["dispatch_kind"] != "in_process":
             raise _refuse("NOT_SUSPENDABLE")
+        if attempt.get("cancel_requested_at"):
+            # Only a cancel that arrives after the suspend confirms the stop at
+            # once, so a suspend after the cancel would wait forever.
+            raise _refuse("CANCEL_REQUESTED")
         stored = {"v": 2, "kind": kind, "payload": copy.deepcopy(suspension.get("payload") or {}),
                   "since": _now().isoformat()}
         stored.update({k: v for k, v in (("tool_use_id", tool_use_id), ("form", form)) if v is not None})

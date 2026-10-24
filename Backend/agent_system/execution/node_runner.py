@@ -17,12 +17,24 @@ leaves the work itself to the ``NodeHandler`` of the node's kind
    made by the work identifies its attempt, so the store can refuse writes
    from an attempt that no longer counts.
 4. Mark the attempt as running. A job's worker does this itself.
-5. Let the handler do the work under the attempt's cancel token.
+5. Let the handler do the work under the attempt's cancel token. A retry
+   attempt of a run whose agent keeps its session (``resumable``) continues
+   that session instead of starting over.
 6. Extract each output port, validate it against its artifact type and convert
    it to the stored form ``{type, ref: {table, ids}, summary, phi}``
    (``artifact_refs.py``).
 7. Record the result with ``complete_attempt`` or ``fail_attempt``. If the
    attempt was cancelled, confirm the stop with ``confirm_stopped`` instead.
+   An agent that stopped to wait (a question to the user, a tool approval, a
+   pause) is recorded with ``suspend``: the attempt keeps its state in the
+   store and its transcript, and nothing runs until it is resumed. If the
+   store refuses the suspend because the attempt was cancelled or superseded,
+   the stop is confirmed instead. Each of these records carries the model
+   tokens the attempt spent.
+
+``NodeRunner.resume(view, node_id)`` continues a suspended attempt once the
+store lets it (the question is answered, or the pause ended): the same
+attempt runs again from step 5, with the answer.
 
 The runner emits no events itself: status events come from the store's
 transactions and view events from the dispatcher.
@@ -37,7 +49,7 @@ from typing import Any, Literal, Optional
 from uuid import UUID
 
 from ..planning.inputs import resolve_inputs
-from ..toolkit.agents.engine import AgentEngine, Usage
+from ..toolkit.agents.engine import AgentEngine, Resume, Usage
 from ..toolkit.agents.spec import AgentSpec
 from ..toolkit.artifacts.base import ArtifactValidationError
 from ..toolkit.catalog import Catalog, UnknownRefError
@@ -61,18 +73,22 @@ from .node_handlers import (
     Outcome,
     Prepared,
     Produced,
+    Suspended,
     ToolNodeHandler,
 )
 
 logger = logging.getLogger(__name__)
 
-type ReportStatus = Literal["completed", "failed", "cancelled", "not_started", "stale"]
+type ReportStatus = Literal["completed", "failed", "cancelled", "suspended", "not_started", "stale"]
 type SinkFor = Callable[[str], Optional[EventSink]]
 
 # Store refusals meaning the attempt no longer counts (it was superseded,
 # cancelled or ended in the meantime). Its result is dropped; this is not an error.
 STALE_CODES = frozenset({"STALE_ATTEMPT", "ATTEMPT_ENDED", "ATTEMPT_SUSPENDED"})
 OUTPUT_ERRORS = (PortExtractError, ArtifactValidationError, StoredRefError)
+# Suspend refusals meaning the attempt must stop instead of waiting: it has a
+# cancel request, or it is no longer a running attempt of a current run.
+STOP_INSTEAD_CODES = frozenset({"CANCEL_REQUESTED", "NOT_SUSPENDABLE"})
 
 
 @dataclass(frozen=True)
@@ -80,7 +96,8 @@ class NodeReport:
     """The outcome of one ``NodeRunner.run`` call. ``code`` is the error or refusal code.
 
     ``stale`` means the attempt ran but was superseded or cancelled before its
-    result could be recorded.
+    result could be recorded. ``suspended`` means the attempt waits for an
+    answer or for the end of a pause; ``code`` is then the suspension's kind.
     """
 
     node_id: str
@@ -112,6 +129,26 @@ def _live(view: GraphView, node_id: str) -> LiveNode:
 
 def _port_output(run: Any, port: str) -> Optional[Mapping[str, Any]]:
     return ((run.outputs or {}).get("ports") or {}).get(port) if run is not None else None
+
+
+def resume_value(suspension: Mapping[str, Any]) -> Resume:
+    """How a suspended attempt continues, from its stored suspension.
+
+    A pause continues with nothing to answer. An answered question continues
+    with the user's answer; a tool approval or a form with the decision
+    (``approve`` or ``reject``).
+    """
+    if suspension.get("kind") == "pause":
+        return Resume.continue_()
+    given = suspension.get("resume") or {}
+    return Resume(given["answer"] if "answer" in given else given.get("decision"))
+
+
+def usage_record(usage: Usage) -> Optional[dict[str, Any]]:
+    """The stored form of an attempt's usage, or ``None`` when no model tokens were spent."""
+    if usage.total_tokens == 0:
+        return None
+    return {"v": 1, "input_tokens": usage.prompt_tokens, "output_tokens": usage.completion_tokens}
 
 
 def pin_inputs(view: GraphView, node_id: str, catalog: Catalog) -> dict[str, NodeInput]:
@@ -219,12 +256,17 @@ class NodeRunner:
             return NodeReport(node_id, "not_started", code=refusal.code, detail=refusal.message)
 
         attempt = _Started(node_id, started.run.run_id, started.attempt.attempt_id)
+        resume = None
         if not started.first_start:  # a retry keeps the inputs of the run's first start
             inputs = frozen_inputs(view, started)
             prepared = handler.prepare(live.node, spec, inputs)
+            if started.run.execution_policy.get("resumable"):
+                # The agent continues its saved session; with nothing saved, the engine starts afresh.
+                resume = Resume.continue_()
         work = NodeWork(
             node=live.node, spec=spec, inputs=inputs, run=started.run, attempt=started.attempt,
             ctx=self._context(view, live, started, prepared, cancel), cancel=cancel, prepared=prepared,
+            resume=resume,
         )
 
         if prepared.dispatch_kind != "job":
@@ -234,10 +276,53 @@ class NodeRunner:
                 if refusal.code == "CANCEL_REQUESTED":  # cancelled before it ran
                     return await self._stopped(attempt)
                 raise
+        return await self._finish(handler, spec, work, attempt)
 
+    async def resume(self, view: GraphView, node_id: str, *, cancel: Optional[CancelToken] = None) -> NodeReport:
+        """Continue the suspended attempt of ``node_id`` and run it to the end.
+
+        The attempt is the same one that suspended; no new attempt is opened.
+        The store refuses (``NOT_RESUMABLE``) while the question is unanswered,
+        while the session is paused, or once the run was superseded or
+        cancelled; nothing runs then, and the caller should read the graph
+        again. An answered question resumes with the answer, or with the
+        decision for a tool approval or a form; a pause resumes with a plain
+        continue.
+        """
+        cancel = cancel or CancelToken()
+        try:
+            live = _live(view, node_id)
+            if live.run is None or live.attempt is None or live.attempt.state != "suspended":
+                raise NotStartable("NOT_SUSPENDED", f"node {node_id} has no suspended attempt")
+            spec, handler = self._resolve(live)
+        except NotStartable as refusal:
+            return NodeReport(node_id, "not_started", code=refusal.code, detail=refusal.detail)
+
+        attempt = _Started(node_id, live.run.run_id, live.attempt.attempt_id)
+        try:
+            # The store's copy, not the view's: the answer may be newer than the view.
+            resumed = await self.store.resume(attempt.run_id, attempt.attempt_id)
+        except GraphStoreError as refusal:
+            return attempt.report("not_started", refusal.code, refusal.message)
+
+        started = StartResult(run=live.run, attempt=resumed, first_start=False)
+        inputs = frozen_inputs(view, started)
+        prepared = handler.prepare(live.node, spec, inputs)
+        work = NodeWork(
+            node=live.node, spec=spec, inputs=inputs, run=live.run, attempt=resumed,
+            ctx=self._context(view, live, started, prepared, cancel), cancel=cancel, prepared=prepared,
+            resume=resume_value(resumed.suspension or {}),
+        )
+        return await self._finish(handler, spec, work, attempt)
+
+    async def _finish(self, handler: NodeHandler, spec: NodeSpec, work: NodeWork, attempt: _Started) -> NodeReport:
+        """Run the attempt's work and record how it ended."""
+        cancel = work.cancel
         outcome = await self._execute(handler, work)
         if cancel.cancelled:
             return await self._stopped(attempt, outcome.usage)
+        if isinstance(outcome, Suspended):
+            return await self._suspend(attempt, outcome)
         if isinstance(outcome, Produced):
             try:
                 outputs = self.outputs(spec, outcome.result)
@@ -307,7 +392,7 @@ class NodeRunner:
 
     async def _complete(self, attempt: _Started, outputs: dict[str, Any], usage: Usage) -> NodeReport:
         try:
-            await self.store.complete_attempt(attempt.run_id, attempt.attempt_id, outputs)
+            await self.store.complete_attempt(attempt.run_id, attempt.attempt_id, outputs, usage_record(usage))
         except GraphStoreError as refusal:
             if refusal.code in STALE_CODES:
                 return attempt.report("stale", refusal.code, refusal.message, usage)
@@ -319,12 +404,30 @@ class NodeRunner:
     async def _fail(self, attempt: _Started, outcome: Failed) -> NodeReport:
         error = {"code": outcome.code, "message": outcome.message[:2000]}
         try:
-            await self.store.fail_attempt(attempt.run_id, attempt.attempt_id, error)
+            await self.store.fail_attempt(attempt.run_id, attempt.attempt_id, error, usage_record(outcome.usage))
         except GraphStoreError as refusal:
             if refusal.code in STALE_CODES:
                 return attempt.report("stale", refusal.code, refusal.message, outcome.usage)
             raise
         return attempt.report("failed", outcome.code, outcome.message, outcome.usage)
+
+    async def _suspend(self, attempt: _Started, outcome: Suspended) -> NodeReport:
+        """Record that the attempt waits, or confirm its stop if it may not wait.
+
+        A suspend that is sent again is accepted by the store as the same
+        suspension, so a retried call is safe.
+        """
+        suspension = outcome.suspension
+        body: dict[str, Any] = {"kind": suspension.kind.value, "payload": dict(suspension.payload)}
+        if suspension.tool_use_id is not None:
+            body["tool_use_id"] = suspension.tool_use_id
+        try:
+            await self.store.suspend(attempt.run_id, attempt.attempt_id, body)
+        except GraphStoreError as refusal:
+            if refusal.code not in STOP_INSTEAD_CODES:
+                raise
+            return await self._stopped(attempt, outcome.usage)
+        return attempt.report("suspended", suspension.kind.value, usage=outcome.usage)
 
     async def _stopped(self, attempt: _Started, usage: Optional[Usage] = None) -> NodeReport:
         """Confirm to the store that a cancelled attempt has stopped.
@@ -332,12 +435,13 @@ class NodeRunner:
         If the cancel was never requested from the store (for example during a
         shutdown), it is requested first, so the stop is always recorded.
         """
+        spent = usage_record(usage or Usage())
         try:
-            stopped = await self.store.confirm_stopped(attempt.run_id, attempt.attempt_id)
+            stopped = await self.store.confirm_stopped(attempt.run_id, attempt.attempt_id, spent)
         except GraphStoreError as refusal:
             if refusal.code != "NO_CANCEL_REQUEST":
                 raise
             await self.store.request_cancel(attempt.run_id, attempt.attempt_id, reason="harness")
-            stopped = await self.store.confirm_stopped(attempt.run_id, attempt.attempt_id)
+            stopped = await self.store.confirm_stopped(attempt.run_id, attempt.attempt_id, spent)
         code = (stopped.error or {}).get("code")
         return attempt.report("failed" if stopped.state == "failed" else "cancelled", code, usage=usage)

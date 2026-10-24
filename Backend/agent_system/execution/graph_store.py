@@ -57,6 +57,8 @@ class Attempt(_Record):
     cancel_requested_at: Optional[datetime] = None
     resumed_at: Optional[datetime] = None
     error: Optional[dict[str, Any]] = None
+    # {v: 1, input_tokens, output_tokens, model?}, written when the attempt ends
+    usage: Optional[dict[str, Any]] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
 
@@ -168,10 +170,14 @@ class GraphStore(Protocol):
     async def start_node(self, request: StartRequest) -> StartResult: ...
     async def mark_dispatched(self, run_id: str, attempt_id: str, state: str) -> Attempt: ...
     async def mark_running(self, run_id: str, attempt_id: str) -> Attempt: ...
-    async def complete_attempt(self, run_id: str, attempt_id: str, outputs: dict[str, Any]) -> Attempt: ...
-    async def fail_attempt(self, run_id: str, attempt_id: str, error: dict[str, Any]) -> Attempt: ...
+    # `usage` is the model tokens the attempt spent, added to the session's budget.
+    async def complete_attempt(self, run_id: str, attempt_id: str, outputs: dict[str, Any],
+                               usage: Optional[dict[str, Any]] = None) -> Attempt: ...
+    async def fail_attempt(self, run_id: str, attempt_id: str, error: dict[str, Any],
+                           usage: Optional[dict[str, Any]] = None) -> Attempt: ...
     async def request_cancel(self, run_id: str, attempt_id: str, reason: str = "user") -> Attempt: ...
-    async def confirm_stopped(self, run_id: str, attempt_id: str) -> Attempt: ...
+    async def confirm_stopped(self, run_id: str, attempt_id: str,
+                              usage: Optional[dict[str, Any]] = None) -> Attempt: ...
     async def reconcile(self, run_id: str, attempt_id: str, observed: str,
                         outputs: Optional[dict[str, Any]] = None) -> tuple[Attempt, str]: ...
     # T10: suspend (harness), answer (the user), resume (harness); the same attempt throughout.
@@ -248,19 +254,26 @@ class HttpGraphStore:
     async def mark_running(self, run_id: str, attempt_id: str) -> Attempt:
         return Attempt.model_validate(await self._call(self.client.mark_running(run_id, attempt_id)))
 
-    async def complete_attempt(self, run_id: str, attempt_id: str, outputs: dict[str, Any]) -> Attempt:
+    async def complete_attempt(self, run_id: str, attempt_id: str, outputs: dict[str, Any],
+                               usage: Optional[dict[str, Any]] = None) -> Attempt:
         return Attempt.model_validate(
-            await self._call(self.client.complete_attempt(run_id, attempt_id, outputs))
+            await self._call(self.client.complete_attempt(run_id, attempt_id, outputs, usage))
         )
 
-    async def fail_attempt(self, run_id: str, attempt_id: str, error: dict[str, Any]) -> Attempt:
-        return Attempt.model_validate(await self._call(self.client.fail_attempt(run_id, attempt_id, error)))
+    async def fail_attempt(self, run_id: str, attempt_id: str, error: dict[str, Any],
+                           usage: Optional[dict[str, Any]] = None) -> Attempt:
+        return Attempt.model_validate(
+            await self._call(self.client.fail_attempt(run_id, attempt_id, error, usage))
+        )
 
     async def request_cancel(self, run_id: str, attempt_id: str, reason: str = "user") -> Attempt:
         return Attempt.model_validate(await self._call(self.client.request_cancel(run_id, attempt_id, reason)))
 
-    async def confirm_stopped(self, run_id: str, attempt_id: str) -> Attempt:
-        return Attempt.model_validate(await self._call(self.client.confirm_stopped(run_id, attempt_id)))
+    async def confirm_stopped(self, run_id: str, attempt_id: str,
+                              usage: Optional[dict[str, Any]] = None) -> Attempt:
+        return Attempt.model_validate(
+            await self._call(self.client.confirm_stopped(run_id, attempt_id, usage))
+        )
 
     async def reconcile(self, run_id: str, attempt_id: str, observed: str,
                         outputs: Optional[dict[str, Any]] = None) -> tuple[Attempt, str]:

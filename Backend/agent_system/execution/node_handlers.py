@@ -9,7 +9,9 @@ attempt as running, extracts the outputs and records the result. A
   limits recorded on the run and, for an agent, its prompt and spec digest.
   Raising ``NotStartable`` keeps the node from starting.
 - ``execute``, once the attempt is running, does the work and returns
-  ``Produced`` (the result the output ports read) or ``Failed`` (an error code).
+  ``Produced`` (the result the output ports read), ``Failed`` (an error code)
+  or, for an agent, ``Suspended`` (what the agent waits for: an answer from
+  the user, a tool approval, or the end of a pause).
 
 The runner selects a handler by the node's ``target_kind``. A job is not a
 kind of node: it is a way of running a tool (``execution="job"``), routed by
@@ -25,7 +27,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
-from ..toolkit.agents.engine import AgentEngine, AgentStatus, Usage
+from ..toolkit.agents.engine import AgentEngine, AgentStatus, Resume, Suspension, Usage
 from ..toolkit.agents.spec import AgentSpec
 from ..toolkit.catalog import Catalog
 from ..toolkit.context import Caller, ToolContext
@@ -94,7 +96,12 @@ class Prepared:
 
 @dataclass(frozen=True)
 class NodeWork:
-    """One attempt, ready to run."""
+    """One attempt, ready to run.
+
+    ``resume`` is set when an agent continues its saved session instead of
+    starting one: the answer to its question, or a plain continue after a
+    pause or an interrupted attempt.
+    """
 
     node: Node
     spec: NodeSpec
@@ -104,6 +111,7 @@ class NodeWork:
     ctx: ToolContext
     cancel: CancelToken
     prepared: Prepared
+    resume: Resume | None = None
 
 
 @dataclass(frozen=True)
@@ -119,7 +127,15 @@ class Failed:
     usage: Usage = field(default_factory=Usage)
 
 
-type Outcome = Produced | Failed
+@dataclass(frozen=True)
+class Suspended:
+    """The agent stopped without finishing and waits; nothing keeps running meanwhile."""
+
+    suspension: Suspension
+    usage: Usage = field(default_factory=Usage)
+
+
+type Outcome = Produced | Failed | Suspended
 
 
 class NodeHandler(Protocol):
@@ -209,7 +225,9 @@ class AgentNodeHandler:
         message = work.prepared.compiled_prompt or ""
         if spec.context_builder is not None:
             message = spec.context_builder(str(work.node.params.get("task") or ""), inputs, work.ctx)
-        result = await self.engine.run(spec, message, inputs, work.ctx, work.cancel)
+        result = await self.engine.run(spec, message, inputs, work.ctx, work.cancel, resume=work.resume)
+        if result.status is AgentStatus.SUSPENDED:
+            return Suspended(result.suspension, result.usage)
         if result.status is not AgentStatus.COMPLETED:
             return Failed(result.error_code or "error", result.summary, result.usage)
         if spec.on_complete is not None:

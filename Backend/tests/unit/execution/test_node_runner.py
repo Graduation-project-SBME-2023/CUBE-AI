@@ -11,7 +11,15 @@ from pydantic import BaseModel
 
 from agent_system.execution.in_memory_graph_store import InMemoryGraphStore
 from agent_system.execution.node_runner import NodeRunner
-from agent_system.toolkit.agents.engine import AgentResult, AgentStatus, FakeAgentEngine
+from agent_system.toolkit.agents.engine import (
+    AgentResult,
+    AgentStatus,
+    FakeAgentEngine,
+    Resume,
+    Suspension,
+    SuspensionKind,
+    Usage,
+)
 from agent_system.toolkit.agents.spec import AgentSpec
 from agent_system.toolkit.context import ToolContext
 from agent_system.toolkit.ports import ExtractedArtifact, PortSpec
@@ -86,6 +94,9 @@ def catalog(calls: Calls, *, on_complete: Any = None):
         AgentSpec(agent_type="cohort_agent", description="Builds a cohort.", kind="execution",
                   system_prompt="Work.", outputs={"cohort": PortSpec("Cohort", extract=_cohort)},
                   on_complete=on_complete),
+        AgentSpec(agent_type="stateless_agent", description="Builds a cohort, keeping no session.",
+                  kind="execution", system_prompt="Work.", resumable=False,
+                  outputs={"cohort": PortSpec("Cohort", extract=_cohort)}),
         AgentSpec(agent_type="reader_agent", description="Reads a cohort.", kind="execution",
                   system_prompt="Read.", inputs={"cohort": PortSpec("Cohort")}),
         _tool("extract_features", extract, inputs=reads, outputs=features),
@@ -347,6 +358,79 @@ async def test_a_late_result_of_a_superseded_attempt_is_not_recorded(store, call
 
 
 # ----------------------------------------------------------------------
+# Suspensions
+# ----------------------------------------------------------------------
+def asks(question: str = "use wavelets?") -> AgentResult:
+    return AgentResult(status=AgentStatus.SUSPENDED, suspension=Suspension(
+        kind=SuspensionKind.ASK_USER, tool_use_id="toolu_1", payload={"question": question},
+    ))
+
+
+PAUSED = AgentResult(status=AgentStatus.SUSPENDED, suspension=Suspension(kind=SuspensionKind.PAUSE))
+
+
+async def test_a_question_suspends_the_attempt_instead_of_failing_it(store, calls):
+    node_runner, _ = runner(store, calls, cohort_agent=asks())
+    session_id, [agent] = await graph(store, "cohort_agent")
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert (report.status, report.code) == ("suspended", "ask_user")
+    stored = await current_run(store, session_id, agent["node_id"])
+    attempt = stored.attempts[0]
+    assert stored.status == "running" and attempt.attempt_id == report.attempt_id
+    assert attempt.state == "suspended" and attempt.error is None
+    assert (attempt.suspension["tool_use_id"], attempt.suspension["payload"]) == (
+        "toolu_1", {"question": "use wavelets?"})
+    assert (await store.get_graph(session_id)).activity == "awaiting_user"
+
+
+async def test_a_pause_suspends_with_no_tool_call(store, calls):
+    node_runner, _ = runner(store, calls, cohort_agent=PAUSED)
+    session_id, [agent] = await graph(store, "cohort_agent")
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert (report.status, report.code) == ("suspended", "pause")
+    suspension = (await current_run(store, session_id, agent["node_id"])).attempts[0].suspension
+    assert suspension["kind"] == "pause" and "tool_use_id" not in suspension
+
+
+async def test_a_cancel_requested_before_the_suspend_is_confirmed_as_a_stop(store, calls):
+    async def cancelled_then_asks(spec, task, inputs, ctx, cancel) -> AgentResult:
+        # The user pressed Stop, but the agent asked its question before the token fired.
+        await store.request_cancel(ctx.run_id, ctx.attempt_id)
+        return asks()
+
+    node_runner, _ = runner(store, calls, cohort_agent=cancelled_then_asks)
+    session_id, [agent] = await graph(store, "cohort_agent")
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert report.status == "cancelled"
+    assert (await current_run(store, session_id, agent["node_id"])).attempts[0].state == "cancelled"
+    assert (await store.get_graph(session_id)).activity == "idle"  # nothing is left waiting
+
+
+async def test_a_run_superseded_before_the_suspend_is_confirmed_as_a_stop(store, calls):
+    session_id, [agent] = await graph(store, "cohort_agent")
+
+    async def edited_then_asks(spec, task, inputs, ctx, cancel) -> AgentResult:
+        # The user edited the node while it ran; the change restarts it.
+        edited = {**agent, "params": {"task": "build it again"}}
+        await submit(store, session_id, [edited], on_running="restart")
+        return asks()
+
+    node_runner, _ = runner(store, calls, cohort_agent=edited_then_asks)
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert report.status == "cancelled"
+    old_run = (await store.node_runs(agent["node_id"]))[0]
+    assert old_run.superseded_at is not None and old_run.attempts[0].state == "cancelled"
+
+
+# ----------------------------------------------------------------------
 # Retries
 # ----------------------------------------------------------------------
 async def test_starting_a_failed_run_again_opens_a_new_attempt_of_the_same_run(store, calls):
@@ -366,3 +450,191 @@ async def test_starting_a_failed_run_again_opens_a_new_attempt_of_the_same_run(s
     assert second.run_id == first.run_id and second.attempt_id != first.attempt_id
     stored = await current_run(store, session_id, agent["node_id"])
     assert [a.state for a in stored.attempts] == ["failed", "succeeded"]
+
+
+FAILED_ONCE = [AgentResult(status=AgentStatus.FAILED, error_code="error"), cohort_done()]
+
+
+async def test_a_retry_of_a_resumable_run_continues_its_saved_session(store, calls):
+    node_runner, engine = runner(store, calls, cohort_agent=FAILED_ONCE)
+    session_id, [agent] = await graph(store, "cohort_agent")
+    await run(node_runner, store, session_id, agent["node_id"])
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert report.status == "completed"
+    assert [call.resume for call in engine.calls] == [None, Resume.continue_()]
+
+
+async def test_a_retry_of_a_run_that_keeps_no_session_starts_over(store, calls):
+    node_runner, engine = runner(store, calls, stateless_agent=FAILED_ONCE)
+    session_id, [agent] = await graph(store, "stateless_agent")
+    await run(node_runner, store, session_id, agent["node_id"])
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert report.status == "completed"
+    assert [call.resume for call in engine.calls] == [None, None]
+
+
+# ----------------------------------------------------------------------
+# Resuming a suspended attempt
+# ----------------------------------------------------------------------
+async def suspended_node(store, calls, *results: AgentResult):
+    """A one-node graph whose agent plays ``results`` in order; the first one suspends it."""
+    node_runner, engine = runner(store, calls, cohort_agent=list(results))
+    session_id, [agent] = await graph(store, "cohort_agent")
+    first = await run(node_runner, store, session_id, agent["node_id"])
+    assert first.status == "suspended"
+    return node_runner, engine, session_id, agent["node_id"], first
+
+
+async def resume(node_runner: NodeRunner, store, session_id: str, node_id: str, **options: Any):
+    return await node_runner.resume(await store.get_graph(session_id), node_id, **options)
+
+
+async def test_an_answered_question_resumes_the_same_attempt_with_the_answer(store, calls):
+    node_runner, engine, session_id, node_id, first = await suspended_node(store, calls, asks(), cohort_done())
+    await store.answer(first.run_id, first.attempt_id, "toolu_1", answer="yes, with wavelets")
+
+    report = await resume(node_runner, store, session_id, node_id)
+
+    assert (report.status, report.attempt_id) == ("completed", first.attempt_id)
+    assert engine.calls[-1].resume == Resume("yes, with wavelets")
+    assert engine.calls[-1].ctx.attempt_id == first.attempt_id
+    stored = await current_run(store, session_id, node_id)
+    assert [a.state for a in stored.attempts] == ["succeeded"]  # a suspension is not a new attempt
+    assert stored.attempts[0].resumed_at is not None
+    assert stored.outputs["ports"]["cohort"]["ref"]["ids"] == [COHORT_ID]
+
+
+async def test_a_question_that_is_not_answered_yet_does_not_resume(store, calls):
+    node_runner, engine, session_id, node_id, first = await suspended_node(store, calls, asks(), cohort_done())
+
+    report = await resume(node_runner, store, session_id, node_id)
+
+    assert (report.status, report.code) == ("not_started", "NOT_RESUMABLE")
+    assert len(engine.calls) == 1
+    assert (await current_run(store, session_id, node_id)).attempts[0].state == "suspended"
+
+
+async def test_a_tool_approval_resumes_with_the_users_decision(store, calls):
+    approval = AgentResult(status=AgentStatus.SUSPENDED, suspension=Suspension(
+        kind=SuspensionKind.TOOL_APPROVAL, tool_use_id="toolu_7", payload={"tool": "save_cohort"},
+    ))
+    node_runner, engine, session_id, node_id, first = await suspended_node(
+        store, calls, approval, cohort_done())
+    await store.answer(first.run_id, first.attempt_id, "toolu_7", decision="reject", comment="not yet")
+
+    report = await resume(node_runner, store, session_id, node_id)
+
+    assert report.status == "completed"
+    assert engine.calls[-1].resume == Resume("reject")
+
+
+async def test_a_pause_resumes_with_a_plain_continue_once_the_session_is_active(store, calls):
+    node_runner, engine, session_id, node_id, first = await suspended_node(store, calls, PAUSED, cohort_done())
+    await store.set_control_state(session_id, "paused")
+    still_paused = await resume(node_runner, store, session_id, node_id)
+    await store.set_control_state(session_id, "active")
+
+    report = await resume(node_runner, store, session_id, node_id)
+
+    assert (still_paused.status, still_paused.code) == ("not_started", "NOT_RESUMABLE")
+    assert (report.status, report.attempt_id) == ("completed", first.attempt_id)
+    assert engine.calls[-1].resume == Resume.continue_()
+
+
+async def test_a_resumed_agent_may_suspend_again_on_the_same_attempt(store, calls):
+    second_question = AgentResult(status=AgentStatus.SUSPENDED, suspension=Suspension(
+        kind=SuspensionKind.ASK_USER, tool_use_id="toolu_2", payload={"question": "and the bin width?"},
+    ))
+    node_runner, _, session_id, node_id, first = await suspended_node(
+        store, calls, asks(), second_question, cohort_done())
+    await store.answer(first.run_id, first.attempt_id, "toolu_1", answer="yes")
+
+    report = await resume(node_runner, store, session_id, node_id)
+
+    assert (report.status, report.attempt_id) == ("suspended", first.attempt_id)
+    attempt = (await current_run(store, session_id, node_id)).attempts[0]
+    assert attempt.suspension["tool_use_id"] == "toolu_2" and "resume" not in attempt.suspension
+
+
+async def test_a_suspended_attempt_that_was_stopped_has_nothing_to_resume(store, calls):
+    node_runner, engine, session_id, node_id, first = await suspended_node(store, calls, asks(), cohort_done())
+    await store.request_cancel(first.run_id, first.attempt_id)  # confirmed at once: no work was running
+
+    report = await resume(node_runner, store, session_id, node_id)
+
+    assert (report.status, report.code) == ("not_started", "NOT_SUSPENDED")
+    assert len(engine.calls) == 1
+
+
+async def test_a_resumed_attempt_can_be_cancelled_like_any_running_one(store, calls):
+    async def works_until_cancelled(spec, task, inputs, ctx, cancel, resume=None) -> AgentResult:
+        if resume is None:
+            return asks()
+        calls.started.set()
+        while not cancel.cancelled:  # like the engine, it stops once the token fires
+            await asyncio.sleep(0.01)
+        return AgentResult(status=AgentStatus.CANCELLED, error_code="cancelled")
+
+    node_runner, _ = runner(store, calls, cohort_agent=works_until_cancelled)
+    session_id, [agent] = await graph(store, "cohort_agent")
+    first = await run(node_runner, store, session_id, agent["node_id"])
+    await store.answer(first.run_id, first.attempt_id, "toolu_1", answer="yes")
+    cancel = CancelToken()
+
+    task = asyncio.create_task(resume(node_runner, store, session_id, agent["node_id"], cancel=cancel))
+    await asyncio.wait_for(calls.started.wait(), 1)
+    await store.request_cancel(first.run_id, first.attempt_id)
+    cancel.cancel()
+    report = await asyncio.wait_for(task, 1)
+
+    assert (report.status, report.attempt_id) == ("cancelled", first.attempt_id)
+    assert (await current_run(store, session_id, agent["node_id"])).attempts[0].state == "cancelled"
+
+
+# ----------------------------------------------------------------------
+# Usage
+# ----------------------------------------------------------------------
+async def test_the_attempt_records_the_tokens_its_agent_spent(store, calls):
+    spent = AgentResult(status=AgentStatus.COMPLETED, output={"cohort_id": COHORT_ID, "size": 12},
+                        usage=Usage(prompt_tokens=1200, completion_tokens=300))
+    node_runner, _ = runner(store, calls, cohort_agent=spent)
+    session_id, [agent] = await graph(store, "cohort_agent")
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert report.usage.total_tokens == 1500
+    usage = (await current_run(store, session_id, agent["node_id"])).attempts[0].usage
+    assert (usage["input_tokens"], usage["output_tokens"]) == (1200, 300)
+
+
+async def test_a_failed_or_stopped_attempt_records_its_tokens_too(store, calls):
+    failed = AgentResult(status=AgentStatus.FAILED, error_code="max_iterations", usage=Usage(500, 50))
+
+    async def stops(spec, task, inputs, ctx, cancel) -> AgentResult:
+        cancel.cancel()
+        return AgentResult(status=AgentStatus.CANCELLED, error_code="cancelled", usage=Usage(40, 2))
+
+    node_runner, _ = runner(store, calls, cohort_agent=failed, stateless_agent=stops)
+    session_id, [agent] = await graph(store, "cohort_agent")
+    other_session, [other] = await graph(store, "stateless_agent")
+
+    await run(node_runner, store, session_id, agent["node_id"])
+    await run(node_runner, store, other_session, other["node_id"])
+
+    failed_usage = (await current_run(store, session_id, agent["node_id"])).attempts[0].usage
+    stopped_usage = (await current_run(store, other_session, other["node_id"])).attempts[0].usage
+    assert (failed_usage["input_tokens"], stopped_usage["input_tokens"]) == (500, 40)
+
+
+async def test_a_tool_attempt_spends_no_tokens_and_records_none(store, calls):
+    node_runner, _ = runner(store, calls)
+    session_id, [agent, tool] = await graph(store, "cohort_agent", "extract_features")
+    await run(node_runner, store, session_id, agent["node_id"])
+
+    await run(node_runner, store, session_id, tool["node_id"])
+
+    assert (await current_run(store, session_id, tool["node_id"])).attempts[0].usage is None
