@@ -36,8 +36,9 @@ leaves the work itself to the ``NodeHandler`` of the node's kind
 store lets it (the question is answered, or the pause ended): the same
 attempt runs again from step 5, with the answer.
 
-The runner emits no events itself: status events come from the store's
-transactions and view events from the dispatcher.
+Status events come from the store's transactions, and a tool's view events
+from the dispatcher. The runner sends one event itself: the view of an agent
+node that completed, built from its structured output (``agent_views.py``).
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ from ..toolkit.ports import PortExtractError
 from ..toolkit.runtime.cancel import CancelToken
 from ..toolkit.runtime.dispatch import Dispatcher
 from ..toolkit.tools.spec import ToolSpec
+from .agent_views import agent_view
 from .artifact_refs import StoredRefError, stored_port
 from .diff_engine import state_from_view
 from .graph_store import GraphStore, GraphStoreError, GraphView, LiveNode, StartRequest, StartResult
@@ -329,8 +331,23 @@ class NodeRunner:
             except OUTPUT_ERRORS as exc:
                 outcome = Failed("bad_output", str(exc), outcome.usage)
             else:
-                return await self._complete(attempt, outputs, outcome.usage)
+                report = await self._complete(attempt, outputs, outcome.usage)
+                if report.status == "completed":
+                    await self._show(work, outcome.result)
+                return report
         return await self._fail(attempt, outcome)
+
+    async def _show(self, work: NodeWork, result: Any) -> None:
+        """Send a completed agent's view. Best effort: the result is already recorded."""
+        sink = work.ctx.event_sink
+        if sink is None or not isinstance(work.spec, AgentSpec):
+            return
+        try:
+            view = agent_view(work.node, work.run.run_id, getattr(result, "output", None), work.inputs)
+            if view is not None:
+                await sink.emit_view(view)
+        except Exception:
+            logger.exception("the view of node %s (run %s) was not sent", work.node.node_id, work.run.run_id)
 
     # ------------------------------------------------------------------
     # steps

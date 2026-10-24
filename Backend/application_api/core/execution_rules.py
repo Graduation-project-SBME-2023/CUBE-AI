@@ -228,3 +228,76 @@ def derive_activity(facts: ActivityFacts) -> Activity:
     if facts.pending_change:
         return "awaiting_approval"
     return "idle"
+
+
+# ----------------------------------------------------------------------
+# The next step of a session: what the Executor does next
+# ----------------------------------------------------------------------
+NextAction = Literal["start", "resume", "await_release"]
+
+
+@dataclass(frozen=True, slots=True)
+class NodeFacts:
+    """One live node, in graph order, with its current run (if any)."""
+
+    node_id: str
+    approval: str
+    start_released: bool
+    run_status: Optional[str]  # None when the node has no current run
+    holds: bool  # an unreleased downstream hold on the current run
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveAttemptFacts:
+    """The session's non-terminal attempt (at most one runs at a time)."""
+
+    state: str
+    suspension_kind: Optional[str]
+    answered: bool  # the user's answer is recorded on the suspension
+    # The live node of its run; None once the run is superseded or its node removed.
+    node_id: Optional[str]
+
+
+@dataclass(frozen=True, slots=True)
+class NextStep:
+    action: NextAction
+    node_id: str
+
+
+def next_step(
+    control_state: str, nodes: list[NodeFacts], active: Optional[ActiveAttemptFacts]
+) -> Optional[NextStep]:
+    """Return what the Executor should do next in a session, or ``None`` when nothing can happen yet.
+
+    - ``resume``: the session's attempt is suspended and may continue (a pause
+      that ended, or a question the user answered), on a current run.
+    - ``start``: no attempt is active, every earlier live node's current run
+      completed with no hold, and this node has no current run yet.
+    - ``await_release``: that node is next but waits for the user to release it
+      (``approval: before``).
+
+    Nothing happens while the session is not active, while another attempt is
+    active (one runs at a time, including one that is still stopping on a
+    superseded run), while a hold stops the graph, or when the next node's
+    current run failed or was cancelled: a retry is decided elsewhere.
+    """
+    if control_state != "active":
+        return None
+    if active is not None:
+        may_continue = active.suspension_kind == "pause" or (
+            active.suspension_kind in QUESTION_KINDS and active.answered
+        )
+        if active.state == "suspended" and may_continue and active.node_id is not None:
+            return NextStep("resume", active.node_id)
+        return None
+    for node in nodes:
+        if node.run_status == "completed":
+            if node.holds:
+                return None
+            continue
+        if node.run_status is not None:
+            return None
+        if node.approval == "before" and not node.start_released:
+            return NextStep("await_release", node.node_id)
+        return NextStep("start", node.node_id)
+    return None

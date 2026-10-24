@@ -7,9 +7,13 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from typing import Any, Optional
+
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from application_api.core.execution_rules import ActiveAttemptFacts, NodeFacts, next_step
 
 from application_api.db.models.graph_nodes import GraphNode
 from application_api.db.models.node_runs import NodeRun
@@ -33,9 +37,51 @@ async def get_session_graph(db: AsyncSession, session_id: UUID) -> SessionGraph:
     return graph
 
 
+# The session's control state and its non-terminal attempt, with the live node
+# of that attempt's run (NULL once the run is superseded or the node removed).
+_NEXT_STEP_FACTS = text(
+    """
+    SELECT s.control_state, a.state, a.suspension ->> 'kind' AS suspension_kind,
+           COALESCE(a.suspension ? 'resume', false) AS answered,
+           CASE WHEN r.superseded_at IS NULL AND n.removed_at IS NULL THEN n.node_id END AS node_id
+    FROM sessions s
+    LEFT JOIN run_attempts a ON a.session_id = s.session_id AND run_attempt_state_is_active(a.state)
+    LEFT JOIN node_runs r ON r.run_id = a.run_id
+    LEFT JOIN graph_nodes n ON n.node_id = r.node_id
+    WHERE s.session_id = :sid
+    LIMIT 1
+    """
+)
+
+
+def _holds(run: Optional[NodeRun]) -> bool:
+    return bool(run is not None and run.downstream_hold and run.hold_released_by_change_id is None)
+
+
+async def _next_step(db: AsyncSession, session_id: UUID, rows: list[Any]) -> Optional[schemas.NextStepOut]:
+    """What the Executor does next, from the live nodes already read and the session's active attempt."""
+    facts = (await db.execute(_NEXT_STEP_FACTS, {"sid": str(session_id)})).one()
+    active = None
+    if facts.state is not None:
+        active = ActiveAttemptFacts(
+            state=facts.state, suspension_kind=facts.suspension_kind, answered=facts.answered,
+            node_id=str(facts.node_id) if facts.node_id is not None else None,
+        )
+    nodes = [
+        NodeFacts(
+            node_id=str(node.node_id), approval=node.approval,
+            start_released=node.start_released_by_change_id is not None,
+            run_status=run.status if run is not None else None, holds=_holds(run),
+        )
+        for node, run in rows
+    ]
+    step = next_step(facts.control_state, nodes, active)
+    return schemas.NextStepOut(action=step.action, node_id=step.node_id) if step else None
+
+
 async def graph_view(db: AsyncSession, session_id: UUID) -> schemas.SessionGraphView:
     """Version, live nodes with their current runs and latest attempts, the
-    pending change and the derived activity."""
+    pending change, the derived activity and the Executor's next step."""
     graph = await get_session_graph(db, session_id)
     rows = (
         await db.execute(
@@ -69,4 +115,5 @@ async def graph_view(db: AsyncSession, session_id: UUID) -> schemas.SessionGraph
         ],
         pending_change=await changes_repo.pending_change(db, session_id),
         activity=await sessions_repo.session_activity(db, session_id),
+        next_step=await _next_step(db, session_id, rows),
     )

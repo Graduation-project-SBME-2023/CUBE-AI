@@ -280,6 +280,72 @@ async def an_ended_attempt_records_its_usage(store: GraphStore) -> None:
     assert ended.usage is None  # nothing reported, nothing stored
 
 
+async def step(store: GraphStore, session_id: str) -> Optional[tuple[str, str]]:
+    """The graph's next step as (action, node_id), or None."""
+    view = await store.get_graph(session_id)
+    return (view.next_step.action, view.next_step.node_id) if view.next_step else None
+
+
+async def the_next_step_follows_the_graph(store: GraphStore) -> None:
+    session_id = await store.create_session("q")
+    assert await step(store, session_id) is None  # an empty graph
+    a, b = node(), node()
+    await submit(store, session_id, [a, b])
+    assert await step(store, session_id) == ("start", a["node_id"])
+    first = await start(store, session_id, a["node_id"])
+    assert await step(store, session_id) is None  # one attempt at a time
+    await run_ok(store, first)
+    assert await step(store, session_id) == ("start", b["node_id"])
+    await store.set_control_state(session_id, "paused")
+    assert await step(store, session_id) is None  # a paused session starts nothing
+    await store.set_control_state(session_id, "active")
+    pin = {"in": {"node_id": a["node_id"], "run_id": first.run.run_id, "port": "summary"}}
+    second = await start(store, session_id, b["node_id"], pins=pin)
+    await store.mark_dispatched(second.run.run_id, second.attempt.attempt_id, "running")
+    await store.fail_attempt(second.run.run_id, second.attempt.attempt_id, {"code": "error"})
+    assert await step(store, session_id) is None  # a failed run waits for a retry decision
+    # A change that reruns a running node: its attempt is still stopping, so nothing starts.
+    session_id = await store.create_session("q")
+    c = node()
+    await submit(store, session_id, [c])
+    third = await start(store, session_id, c["node_id"])
+    await store.mark_dispatched(third.run.run_id, third.attempt.attempt_id, "running")
+    await submit(store, session_id, [{**c, "params": {"x": 1}}], on_running="restart")
+    assert await step(store, session_id) is None
+    await store.confirm_stopped(third.run.run_id, third.attempt.attempt_id)
+    assert await step(store, session_id) == ("start", c["node_id"])
+
+
+async def the_next_step_resumes_an_answered_or_unpaused_attempt(store: GraphStore) -> None:
+    session_id, agent, started = await running_agent(store)
+    run_id, attempt_id = started.run.run_id, started.attempt.attempt_id
+    await store.suspend(run_id, attempt_id, {"kind": "ask_user", "tool_use_id": "toolu_1"})
+    assert await step(store, session_id) is None  # waits for the answer
+    await store.answer(run_id, attempt_id, "toolu_1", answer="yes")
+    assert await step(store, session_id) == ("resume", agent["node_id"])
+    await store.resume(run_id, attempt_id)
+    await store.suspend(run_id, attempt_id, {"kind": "pause"})
+    await store.set_control_state(session_id, "paused")
+    assert await step(store, session_id) is None  # the pause has not ended
+    await store.set_control_state(session_id, "active")
+    assert await step(store, session_id) == ("resume", agent["node_id"])
+
+
+async def the_next_step_waits_for_a_release_and_for_a_hold(store: GraphStore) -> None:
+    session_id = await store.create_session("q")
+    a = node(approval="before", expect={"v": 1, "rules": [{"metric": "n", "op": ">=", "value": 10}]})
+    b = node()
+    await submit(store, session_id, [a, b])
+    assert await step(store, session_id) == ("await_release", a["node_id"])
+    await submit(store, session_id, [a, b], release_hold_node_ids=[a["node_id"]])
+    assert await step(store, session_id) == ("start", a["node_id"])
+    first = await start(store, session_id, a["node_id"])
+    await run_ok(store, first, {"n": 5})
+    assert await step(store, session_id) is None  # the violated expectation holds the next node
+    await submit(store, session_id, [a, b], release_hold_node_ids=[a["node_id"]])
+    assert await step(store, session_id) == ("start", b["node_id"])
+
+
 async def transcripts_are_fenced_and_seeds_checked(store: GraphStore) -> None:
     session_id, agent, first = await running_agent(store, spec="s1", engine="e1", max_attempts=2,
                                                     idempotent=True)
@@ -405,6 +471,9 @@ SCENARIOS: list[Callable[[GraphStore], Awaitable[None]]] = [
     a_tool_approval_takes_a_decision_and_a_cancel_is_confirmed_at_once,
     a_suspend_after_a_cancel_request_is_refused,
     an_ended_attempt_records_its_usage,
+    the_next_step_follows_the_graph,
+    the_next_step_resumes_an_answered_or_unpaused_attempt,
+    the_next_step_waits_for_a_release_and_for_a_hold,
     transcripts_are_fenced_and_seeds_checked,
     pending_tools_decide_the_automatic_retry,
     approval_before_waits_for_the_users_release,

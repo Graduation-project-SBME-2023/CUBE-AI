@@ -1,15 +1,17 @@
 """Executor resource pools, read from ``config/resources.yaml``.
 
-The pools are runtime only (D19). This module reads their names and sizes;
-the Validator (Plan 8) refuses a target that declares a pool missing from the
-file, and the Executor (Plan 10) sizes one semaphore per pool from it.
+The file names each pool and its size. The Validator refuses a target that
+declares a pool missing from the file, and ``Pools`` gives every pool one
+asyncio semaphore of that size, shared by every session's Executor in this
+worker. Pools are runtime only: a node waiting for a pool is never stored.
 ``CUBEAI_RESOURCES_FILE`` points at another file (tests, deployments).
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -46,3 +48,70 @@ def load_pools(path: Path | None = None) -> Mapping[str, int]:
 
 def pool_names(path: Path | None = None) -> frozenset[str]:
     return frozenset(load_pools(path))
+
+
+class Lease:
+    """The pool slots one node holds while it runs. Releasing it twice releases once."""
+
+    def __init__(self, pools: Pools, names: frozenset[str]) -> None:
+        self.pools = pools
+        self.names = names
+        self.released = False
+
+    def release(self) -> None:
+        self.pools.release(self)
+
+
+class Pools:
+    """One asyncio semaphore per pool, sized from ``resources.yaml``.
+
+    A node takes every pool it declares or none (``try_acquire``), so two
+    nodes never each hold half of what the other needs. A refused caller asks
+    to be told when a slot is released (``notify_on_release``) instead of
+    waiting on a semaphore, so one session waiting for the GPU never blocks
+    another that only needs the CPU.
+    """
+
+    def __init__(self, sizes: Mapping[str, int]) -> None:
+        self.sizes = MappingProxyType(dict(sizes))
+        self._semaphores = {name: asyncio.Semaphore(size) for name, size in sizes.items()}
+        self._listeners: list[Callable[[], None]] = []
+
+    @classmethod
+    def from_config(cls, path: Path | None = None) -> Pools:
+        return cls(load_pools(path))
+
+    def available(self, name: str) -> bool:
+        return not self._semaphores[name].locked()
+
+    async def try_acquire(self, names: Iterable[str]) -> Lease | None:
+        """Take one slot of every pool in ``names``, or none and return ``None``.
+
+        It never waits: each semaphore is checked first, and acquiring one that
+        is not locked returns without suspending, so no other task can take a
+        slot in between. A pool missing from the file raises ``ResourceConfigError``.
+        """
+        wanted = frozenset(names)
+        unknown = sorted(wanted - self._semaphores.keys())
+        if unknown:
+            raise ResourceConfigError(f"unknown resource pools {unknown}")
+        if not all(self.available(name) for name in wanted):
+            return None
+        for name in sorted(wanted):
+            await self._semaphores[name].acquire()
+        return Lease(self, wanted)
+
+    def release(self, lease: Lease) -> None:
+        """Give the lease's slots back and tell every caller that waits for a slot."""
+        if lease.released:
+            return
+        lease.released = True
+        for name in lease.names:
+            self._semaphores[name].release()
+        listeners, self._listeners = self._listeners, []
+        for listener in listeners:
+            listener()
+
+    def notify_on_release(self, listener: Callable[[], None]) -> None:
+        """Call ``listener`` once, at the next release of any slot."""
+        self._listeners.append(listener)

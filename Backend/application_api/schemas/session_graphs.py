@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,10 +27,20 @@ class LiveNodeOut(BaseModel):
     attempt: Optional[RunAttemptOut] = None
 
 
+class NextStepOut(BaseModel):
+    """What the Executor does next: start a node, resume its suspended attempt,
+    or wait for the user to release it."""
+
+    action: Literal["start", "resume", "await_release"]
+    node_id: UUID
+
+
 class SessionGraphView(SessionGraphOut):
     """GET /session-graphs/session/{id}: everything the Executor and the UI
-    read to decide what happens next."""
+    read to decide what happens next. ``next_step`` is ``None`` when nothing
+    can happen until the graph, the session or an attempt changes."""
 
     nodes: list[LiveNodeOut] = Field(default_factory=list)
     pending_change: Optional[GraphChangeOut] = None
     activity: Activity
+    next_step: Optional[NextStepOut] = None

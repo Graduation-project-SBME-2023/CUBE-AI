@@ -94,6 +94,9 @@ def catalog(calls: Calls, *, on_complete: Any = None):
         AgentSpec(agent_type="cohort_agent", description="Builds a cohort.", kind="execution",
                   system_prompt="Work.", outputs={"cohort": PortSpec("Cohort", extract=_cohort)},
                   on_complete=on_complete),
+        AgentSpec(agent_type="study_population_planner_agent", description="Builds a cohort, shown in a view.",
+                  kind="execution", system_prompt="Work.",
+                  outputs={"cohort": PortSpec("Cohort", extract=_cohort)}),
         AgentSpec(agent_type="stateless_agent", description="Builds a cohort, keeping no session.",
                   kind="execution", system_prompt="Work.", resumable=False,
                   outputs={"cohort": PortSpec("Cohort", extract=_cohort)}),
@@ -638,3 +641,79 @@ async def test_a_tool_attempt_spends_no_tokens_and_records_none(store, calls):
     await run(node_runner, store, session_id, tool["node_id"])
 
     assert (await current_run(store, session_id, tool["node_id"])).attempts[0].usage is None
+
+
+# ----------------------------------------------------------------------
+# The agent's view
+# ----------------------------------------------------------------------
+class Sink:
+    """Records the view events sent to one session."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.views: list[Any] = []
+        self.fail = fail
+
+    async def emit(self, event: Any) -> None:
+        pass
+
+    async def emit_view(self, event: Any) -> None:
+        if self.fail:
+            raise RuntimeError("socket gone")
+        self.views.append(event)
+
+
+def viewing_runner(store, calls, sink: Sink, **scripts: Any) -> NodeRunner:
+    engine = FakeAgentEngine({"cohort_agent": cohort_done(), **scripts})
+    return NodeRunner(store, catalog(calls), engine=engine, sink_for=lambda _session_id: sink)
+
+
+COHORT_OUTPUT = {"cohort_id": COHORT_ID, "size": 12, "warnings": ["3 volumes have no label"]}
+
+
+async def test_a_completed_agent_shows_its_structured_output_in_its_view(store, calls):
+    sink = Sink()
+    done = AgentResult(status=AgentStatus.COMPLETED, output=COHORT_OUTPUT)
+    node_runner = viewing_runner(store, calls, sink, study_population_planner_agent=done)
+    session_id, [agent] = await graph(store, "study_population_planner_agent")
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    [view] = sink.views
+    assert view.type == "population_output"
+    assert {key: view.payload[key] for key in ("agent_id", "run_id", "node_id", "status")} == {
+        "agent_id": "study_population_planner_agent", "run_id": report.run_id, "node_id": agent["node_id"],
+        "status": "completed"}
+    assert view.payload["outputs"] == COHORT_OUTPUT
+    assert view.payload["warnings"] == ["3 volumes have no label"] and view.payload["errors"] == []
+
+
+async def test_an_agent_with_no_view_and_a_tool_node_send_none_from_the_runner(store, calls):
+    sink = Sink()
+    node_runner = viewing_runner(store, calls, sink)
+    session_id, [agent, tool] = await graph(store, "cohort_agent", "extract_features")
+
+    await run(node_runner, store, session_id, agent["node_id"])
+    await run(node_runner, store, session_id, tool["node_id"])
+
+    assert sink.views == []
+
+
+async def test_an_agent_that_did_not_complete_shows_no_view(store, calls):
+    sink = Sink()
+    node_runner = viewing_runner(store, calls, sink, study_population_planner_agent=asks())
+    session_id, [agent] = await graph(store, "study_population_planner_agent")
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert report.status == "suspended" and sink.views == []
+
+
+async def test_a_view_that_cannot_be_sent_does_not_undo_the_result(store, calls):
+    done = AgentResult(status=AgentStatus.COMPLETED, output=COHORT_OUTPUT)
+    node_runner = viewing_runner(store, calls, Sink(fail=True), study_population_planner_agent=done)
+    session_id, [agent] = await graph(store, "study_population_planner_agent")
+
+    report = await run(node_runner, store, session_id, agent["node_id"])
+
+    assert report.status == "completed"
+    assert (await current_run(store, session_id, agent["node_id"])).status == "completed"

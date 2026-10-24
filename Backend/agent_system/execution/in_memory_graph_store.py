@@ -35,6 +35,7 @@ from .graph_store import (
     GraphStoreError,
     GraphView,
     LiveNode,
+    NextStep,
     Node,
     Run,
     StartRequest,
@@ -235,7 +236,40 @@ class InMemoryGraphStore:
         pending = self._pending(session_id)
         return GraphView(session_id=session_id, version=session.version, nodes=nodes,
                          pending_change=Change.model_validate(pending) if pending else None,
-                         activity=self.activity(session_id))
+                         activity=self.activity(session_id), next_step=self._next_step(session_id))
+
+    def _next_step(self, session_id: str) -> Optional[NextStep]:
+        """What the Executor does next; the same rule as the Application API's ``next_step``.
+
+        Nothing happens while the session is not active or another attempt is
+        active, unless that attempt is suspended and may continue on a current
+        run. Otherwise the first live node without a completed current run is
+        next, unless a hold or a failed or cancelled run stops the graph first.
+        """
+        if self._session(session_id).control_state != "active":
+            return None
+        active = self._active_attempt(session_id)
+        if active is not None:
+            run = self.runs[active["run_id"]]
+            suspension = active.get("suspension") or {}
+            may_continue = suspension.get("kind") == "pause" or (
+                suspension.get("kind") in QUESTIONS and "resume" in suspension)
+            current = not run.superseded and not self.nodes[run.node_id].removed
+            if active["state"] == "suspended" and may_continue and current:
+                return NextStep(action="resume", node_id=run.node_id)
+            return None
+        for node in self._live(session_id):
+            run = self._current(node.node_id)
+            if run is not None and run.status == "completed":
+                if self._holds(run):
+                    return None
+                continue
+            if run is not None:
+                return None
+            if node.definition["approval"] == "before" and not node.start_released_by_change_id:
+                return NextStep(action="await_release", node_id=node.node_id)
+            return NextStep(action="start", node_id=node.node_id)
+        return None
 
     async def node_runs(self, node_id: str) -> list[Run]:
         if node_id not in self.nodes:

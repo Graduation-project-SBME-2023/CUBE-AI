@@ -116,12 +116,22 @@ class Change(_Record):
     applied_version: Optional[int] = None
 
 
+class NextStep(_Record):
+    """What the Executor does next: ``start`` the node, ``resume`` its suspended
+    attempt, or ``await_release`` (the node waits for the user to release it)."""
+
+    action: Literal["start", "resume", "await_release"]
+    node_id: str
+
+
 class GraphView(_Record):
     session_id: str
     version: int
     nodes: list[LiveNode] = Field(default_factory=list)
     pending_change: Optional[Change] = None
     activity: str
+    # None while nothing can happen until the graph, the session or an attempt changes.
+    next_step: Optional[NextStep] = None
 
 
 class ChangeResult(_Record):
