@@ -786,6 +786,8 @@ Done (2026-10-06):
 
 The worker runs the same handlers, so no wrapper code is needed.
 
+**Status (2026-10-24), the five modeling tools: ⏸ ports postponed (Person 1's decision; task B1).** They cannot take the ports in the table as they stand. The training tools take one argument, `params` (the whole input model), and an input port fills a top-level argument only (`toolkit/tools/consistency.py`, and the Node Runner's `ToolNodeHandler.arguments`), so a `FeatureTable` cannot reach `params.feature_set_id`. The inference tools take file paths (`input_path`, `model_path`) and `refit_model` one `model_result_id`, so none has an argument for a `ModelingOutput` (a list of `model_result_ids`). The graph runs modeling through `run_modeling` (Phase 7.3), whose arguments are flat; the five tools stay `visibility={"agent"}`, without ports. Ways to come back to it: flatten the training tools' arguments inside the pack; teach `@tool` to unwrap a single model argument (a toolkit contract change); give inference and refit a `model_result_ids` argument when `run_modeling`'s `include_inference` is built.
+
 ## Phase 7.3 — `run_modeling` (`toolpacks/modeling/run_modeling.py`)
 
 1. **Manifest (system §15):**
@@ -804,6 +806,8 @@ The worker runs the same handlers, so no wrapper code is needed.
 4. **UI and progress:**
    - `on_result` emits the `modeling_output` view event, copied from `pipeline_monitor.py:182-252`, so `ModelingView` keeps working;
    - progress goes through the context sink.
+
+**Status (2026-10-24): 🟡 params built (task B3); handler, manifest and view hook open (B4, B5).** `RunModelingInput` in `toolpacks/modeling/run_modeling.py` (no `@tool` yet). Defaults: `target` `has_target_disease`, `task` `auto`, `folds` 5 (2–20), `seed` none (0 to 2³²−1), `include_inference` true. `feature_set_ids` are canonical, distinct UUIDs (at least one). `comparisons` is a JSON list of estimator ids, not the comma-separated string of the training tools: checked against both registries, and against its own task when the task is explicit; under `auto` the handler must check them once the task is known. The `auto` rule is `engine/task.infer_task(target)`: a non-numeric column is a classification; whole numbers with at most 10 distinct values (`0/1`, `1.0`, booleans) are a classification; anything else is a regression; missing values are left out first, and a column with no value raises `ValueError`. Tests: `tests/unit/toolpacks/modeling/test_run_modeling_input.py`.
 
 ## Phase 7.4 — Correctness for jobs
 
